@@ -1,4 +1,7 @@
-# devicemap – implementation plan
+# linux-devicemap – implementation plan
+
+("devicemap" as UI shorthand; the package and repository are named
+`linux-devicemap`.)
 
 Real-time graphical view of a computer's ports and devices, drawn at their
 physical locations on the chassis.
@@ -106,11 +109,23 @@ What probing established, and the design consequences:
   PropertiesChanged D-Bus subscription would make those instant — noted
   as optional polish).
 
-### M4 – online bootstrap + layout registry
-- DMI → manufacturer spec/image search to pre-fill a draft layout
-  (LLM-assisted extraction acceptable; user confirms in the wizard).
-- Shareable community registry of layouts (hwdb-like), fetch by DMI key,
-  offer contribution after calibration.
+### M4 – layout contributions (no LLM, no service: `layouts/` IS the registry)
+- `layouts/` in this repo is the registry, hwdb-style: inert JSON keyed
+  by DMI slug, contributed via ordinary PRs, reviewed and versioned with
+  the schema, shipped with the software → lookup is a local file read.
+- Contribution flow in the app: after calibration + human position
+  fixes, export the layout (calibrated bindings promoted in, local-only
+  data stripped) ready for a PR.
+- In-app editor for sides/order/positions (today JSON-only), so a
+  contributor never touches a file by hand; kernel-derived skeleton
+  (slot list, types, auto-bindings are already fully local) + wizard
+  cover the rest.
+- Optional freshness helper: "refresh layouts" fetches raw JSON from
+  the repo's main branch into a local cache, for new models between
+  releases. Off by default; still static files, no service.
+- Layout *authoring* from manufacturer docs is a maintainer workflow
+  outside the runtime (any tools welcome there). No LLM or extraction
+  logic embedded in the software.
 
 ### M5 – polish
 - Docks/hubs as satellite boxes with their subtree; camera/mic in-use

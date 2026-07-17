@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linux-devicemap"
+version = "0.1.0"
+description = "Real-time graphical view of a Linux computer's ports and devices, drawn at their physical locations"
+readme = "README.md"
+license = "MIT"
+authors = [{name = "Pierre Senellart", email = "pierre@senellart.com"}]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: System :: Hardware",
+]
+
+[project.urls]
+Homepage = "https://github.com/PierreSenellart/linux-devicemap"
+
+[project.scripts]
+devicemap = "devicemap.server:main"
+
+[tool.setuptools]
+packages = ["devicemap", "devicemap.probes"]
