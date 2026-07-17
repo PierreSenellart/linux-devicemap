@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import layout, monitor, snapshot
+from .probes import activity
 
 FRONTEND = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 
@@ -136,14 +137,34 @@ async def _battery_poll() -> None:
         await hub.refresh(reason=[{"action": "poll", "subsystem": "power_supply"}])
 
 
+ACTIVITY_POLL_S = 2
+
+
+async def _activity_poll() -> None:
+    """Camera/audio in-use changes emit no udev events: poll a cheap
+    signature and re-probe on change."""
+    last = None
+    while True:
+        await asyncio.sleep(ACTIVITY_POLL_S)
+        sig = await asyncio.to_thread(activity.signature, hub.raw)
+        if last is not None and sig != last:
+            await hub.refresh(reason=[{"action": "activity", "subsystem": "media"}])
+        last = sig
+
+
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     await hub.refresh()
-    tasks = [asyncio.create_task(_event_loop()), asyncio.create_task(_battery_poll())]
+    tasks = [
+        asyncio.create_task(_event_loop()),
+        asyncio.create_task(_battery_poll()),
+        asyncio.create_task(_activity_poll()),
+    ]
     loop = asyncio.get_running_loop()
     on_ev = lambda ev: asyncio.ensure_future(hub.refresh(reason=[ev]))
     closers = monitor.start_jack_watchers(loop, on_ev)
     closers += monitor.start_rtnetlink_watcher(loop, on_ev)
+    closers += monitor.start_video_watchers(loop, on_ev)
     yield
     for t in tasks:
         t.cancel()
@@ -180,6 +201,49 @@ async def slot_position(slot_id: str, payload: dict = Body(...)) -> JSONResponse
     )
     await hub.refresh(reason=[{"action": "move-slot", "subsystem": "layout"}])
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/slot/{slot_id}/label")
+async def slot_label(slot_id: str, payload: dict = Body(...)) -> JSONResponse:
+    layout.save_label(hub.raw["machine"], slot_id, str(payload["label"]))
+    await hub.refresh(reason=[{"action": "rename-slot", "subsystem": "layout"}])
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/port/{port_id}/hidden")
+async def port_hidden(port_id: str, payload: dict = Body(...)) -> JSONResponse:
+    layout.set_hidden(hub.raw["machine"], port_id, bool(payload["hidden"]))
+    await hub.refresh(reason=[{"action": "hide-port", "subsystem": "layout"}])
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/port/{port_id}/place")
+async def port_place(port_id: str) -> JSONResponse:
+    port = next((p for p in hub.raw.get("ports", []) if p["id"] == port_id), None)
+    if not port:
+        return JSONResponse({"ok": False}, status_code=404)
+    layout.add_slot(hub.raw["machine"], port)
+    # a placed port should be visible: clear any hidden flag on it
+    layout.set_hidden(hub.raw["machine"], port_id, False)
+    await hub.refresh(reason=[{"action": "place-port", "subsystem": "layout"}])
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/slot/{slot_id}/unplace")
+async def slot_unplace(slot_id: str) -> JSONResponse:
+    removed = layout.remove_extra_slot(hub.raw["machine"], slot_id)
+    await hub.refresh(reason=[{"action": "unplace-slot", "subsystem": "layout"}])
+    return JSONResponse({"ok": removed})
+
+
+@app.post("/api/layouts/refresh")
+async def layouts_refresh() -> JSONResponse:
+    updated = await asyncio.to_thread(
+        layout.refresh_from_registry, hub.raw["machine"]
+    )
+    if updated:
+        await hub.refresh(reason=[{"action": "refresh-layouts", "subsystem": "layout"}])
+    return JSONResponse({"updated": updated})
 
 
 @app.post("/api/layout/reset")

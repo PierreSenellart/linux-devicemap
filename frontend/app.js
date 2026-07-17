@@ -112,6 +112,20 @@ function storageHtml(dev) {
     .join("");
 }
 
+function inputsHtml(dev) {
+  if (!dev.hid_inputs || !dev.hid_inputs.length) return "";
+  return dev.hid_inputs
+    .map((n) => {
+      const ic = /mouse|trackball|pointer/i.test(n)
+        ? "mouse"
+        : /keyboard|keypad/i.test(n)
+          ? "keyboard"
+          : "plug";
+      return `<div class="sub net">${icon(ic)} ${esc(n)}</div>`;
+    })
+    .join("");
+}
+
 function netHtml(dev) {
   if (!dev.net || !dev.net.length) return "";
   return dev.net
@@ -198,6 +212,7 @@ function renderTools(snap) {
     `<button id="editbtn">${editMode ? "done editing" : "edit layout"}</button>` +
     (editMode
       ? ` <a id="exportlink" class="chip" href="/api/layout/export" download>export layout</a>` +
+        ` <button id="refreshbtn">refresh from registry</button>` +
         (lay.edited
           ? ` <button id="resetbtn">reset positions</button>`
           : "")
@@ -206,6 +221,14 @@ function renderTools(snap) {
     editMode = !editMode;
     if (lastSnap) render(lastSnap);
   };
+  const refreshBtn = $("refreshbtn");
+  if (refreshBtn)
+    refreshBtn.onclick = async () => {
+      const r = await fetch("/api/layouts/refresh", { method: "POST" });
+      const j = await r.json();
+      if (!j.updated)
+        alert("No layout found in the online registry for this machine.");
+    };
   const resetBtn = $("resetbtn");
   if (resetBtn)
     resetBtn.onclick = async () => {
@@ -256,7 +279,7 @@ function treeHtml(children) {
     const d = describeDevice(c);
     return (
       `<li>${icon(deviceIcon(c))}<span class="name">${esc(d.name)}</span>` +
-      ` <span class="sub">${esc(d.sub)}</span>${netHtml(c)}${storageHtml(c)}${treeHtml(c.children)}</li>`
+      ` <span class="sub">${esc(d.sub)}</span>${netHtml(c)}${storageHtml(c)}${inputsHtml(c)}${treeHtml(c.children)}</li>`
     );
   });
   return `<ul class="devtree">${items.join("")}</ul>`;
@@ -344,7 +367,7 @@ function renderPorts(ports, lay) {
   }
   const hidden = new Set(lay.hidden || []);
   for (const p of ports.filter((x) => !used.has(x.id))) {
-    if (hidden.has(p.id) && !p.connected) continue;
+    if (hidden.has(p.id) && !p.connected && !editMode) continue;
     ordered.push({ port: p, group: lay.available ? "unplaced" : "" });
   }
   let lastGroup = null;
@@ -379,6 +402,7 @@ function renderPorts(ports, lay) {
         `<div class="sub">${esc(dev.sub)}</div>` +
         netHtml(port.device) +
         storageHtml(port.device) +
+        inputsHtml(port.device) +
         treeHtml(port.device.children);
     } else if (port.kind === "audio-jack") {
       const j = port.jack || {};
@@ -394,17 +418,47 @@ function renderPorts(ports, lay) {
         ? `<div class="name">${esc(c.name || "card")}${c.size_gb ? ` · ${c.size_gb} GB` : ""}</div>`
         : `<div class="name">empty</div>`;
     } else if (port.kind === "hdmi" || port.kind === "dp") {
-      what = `<div class="name">${port.connected ? "display connected" : "empty"}</div>`;
+      what = `<div class="name">${
+        port.connected ? esc(port.monitor || "display connected") : "empty"
+      }</div>`;
     } else {
       what = `<div class="name">empty</div>`;
     }
     if (!dev) what = what.replace("</div>", `${portId}</div>`);
 
+    const isHidden = hidden.has(port.id);
+    let editExtra = "";
+    if (editMode && !loc) {
+      editExtra =
+        (isHidden ? `<span class="chip">hidden</span> ` : "") +
+        `<button class="hidebtn">${isHidden ? "unhide" : "hide"}</button> ` +
+        `<button class="placebtn">place on chassis</button>`;
+    } else if (editMode && loc && loc.slot.extra) {
+      editExtra = `<button class="placebtn unplace">unplace</button>`;
+    }
     el.innerHTML =
       `<div class="glyph">${icon(PORT_ICON[port.kind] || "plug")}` +
       `<div>${esc(KIND_LABEL[port.kind] || port.kind)}</div></div>` +
       `<div class="what">${what}</div>` +
-      `<div class="power">${powerHtml(port.power)}</div>`;
+      `<div class="power">${powerHtml(port.power)}${editExtra}</div>`;
+    const hideBtn = el.querySelector(".hidebtn");
+    if (hideBtn)
+      hideBtn.onclick = () =>
+        fetch(`/api/port/${encodeURIComponent(port.id)}/hidden`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hidden: !isHidden }),
+        });
+    const placeBtn = el.querySelector(".placebtn");
+    if (placeBtn)
+      placeBtn.onclick = () =>
+        placeBtn.classList.contains("unplace")
+          ? fetch(`/api/slot/${encodeURIComponent(loc.slot.id)}/unplace`, {
+              method: "POST",
+            })
+          : fetch(`/api/port/${encodeURIComponent(port.id)}/place`, {
+              method: "POST",
+            });
     box.appendChild(el);
   }
   prevConnected = nowConnected;
@@ -480,6 +534,9 @@ function renderBuiltins(builtins) {
       const mts = mountsLabel(b.mounts);
       if (mts) value += ` · ${esc(mts)}`;
     }
+    if (b.kind === "display" && b.monitor)
+      value = `${esc(b.name)} · ${esc(b.monitor)}`;
+    if (b.in_use === true) value += ` <span class="inuse">● in use</span>`;
     let label = BUILTIN_LABEL[b.kind] || b.kind;
     if (b.kind === "camera" && b.infrared === true) label = "IR camera";
     if (b.kind === "camera" && b.infrared === false) label = "RGB camera";
@@ -538,7 +595,9 @@ function renderChassis(snap) {
       <text x="320" y="92" text-anchor="middle">display</text>
     </g>
     <g data-builtin="camera">
-      <circle cx="320" cy="20" r="3.5" class="${cams.length ? "active" : ""}"/>
+      <circle cx="320" cy="20" r="3.5" class="${cams.length ? "active" : ""}${
+        cams.some((c) => c.in_use) ? " camuse" : ""
+      }"/>
     </g>
     <rect class="body" x="140" y="172" width="360" height="190" rx="10"/>
     <g data-builtin="keyboard">
@@ -549,6 +608,7 @@ function renderChassis(snap) {
       <rect class="body" x="260" y="288" width="120" height="58" rx="6"/>
       <text x="320" y="322" text-anchor="middle">touchpad</text>
     </g>`;
+  const satellites = [];
   if (lay.available) {
     const STRIP = { left: 18, right: 588 };
     for (const [side, slots] of Object.entries(lay.sides || {})) {
@@ -559,6 +619,8 @@ function renderChassis(snap) {
       for (const s of slots) {
         const y = 38 + s.pos * 296;
         const port = (snap.ports || []).find((p) => p.id === s.port_id);
+        if (port && port.device && (port.device.children || []).length)
+          satellites.push({ port, x, y, side });
         const unbound = !s.binding && !PASSIVE_SLOTS.has(s.type);
         const armed =
           lay.calibration && lay.calibration.slot === s.id ? " armed" : "";
@@ -600,7 +662,8 @@ function renderChassis(snap) {
           : "";
         inner +=
           `<g class="${cls}${editMode ? " editable" : ""}" data-slot="${esc(s.id)}" ` +
-          `data-portid="${esc(s.port_id || "")}" data-basex="${x}" data-basey="${y}">` +
+          `data-portid="${esc(s.port_id || "")}" data-basex="${x}" data-basey="${y}" ` +
+          `data-label="${esc(s.label || "")}">` +
           `<rect class="marker" x="${x + 4}" y="${y}" width="26" height="22" rx="4"/>` +
           iconAt(SLOT_ICON[s.type] || "plug", x + 9, y + 3, 16) +
           arrow +
@@ -633,7 +696,45 @@ function renderChassis(snap) {
       bx += w + 8;
     });
   }
+  // hubs/docks as satellite boxes below the chassis
+  let viewH = 380;
+  if (satellites.length) {
+    viewH = 470;
+    const W = 160;
+    const GAP = 14;
+    let bx = 320 - (satellites.length * (W + GAP) - GAP) / 2;
+    for (const s of satellites) {
+      const d = s.port.device;
+      const title = d.product || "hub";
+      let icons = "";
+      (d.children || [])
+        .slice(0, 7)
+        .forEach((c, i) => (icons += iconAt(deviceIcon(c), bx + 10 + i * 20, 412, 15)));
+      // route outside the strip so the link never crosses other ports
+      const edge = s.side === "left" ? 10 : 630;
+      const exitX = s.side === "left" ? s.x + 4 : s.x + 30;
+      inner +=
+        `<path class="satlink" d="M ${exitX} ${s.y + 11} L ${edge} ${s.y + 11} ` +
+        `L ${edge} 384 L ${bx + W / 2} 384 L ${bx + W / 2} 392"/>` +
+        `<g class="satellite" data-portid="${esc(s.port.id)}">` +
+        `<rect class="marker" x="${bx}" y="392" width="${W}" height="44" rx="8"/>` +
+        `<text class="slotlabel" x="${bx + 10}" y="406">${esc(title.slice(0, 22))}</text>` +
+        icons +
+        `<title>${esc(title)} — ${(d.children || []).length} device(s)</title></g>`;
+      bx += W + GAP;
+    }
+  }
+  svg.setAttribute("viewBox", `0 0 640 ${viewH}`);
   svg.innerHTML = inner;
+  svg.querySelectorAll("g.satellite").forEach((g) => {
+    const pid = g.dataset.portid;
+    g.addEventListener("mouseenter", () => hlCard(pid, true));
+    g.addEventListener("mouseleave", () => hlCard(pid, false));
+    g.addEventListener("click", () => {
+      const card = document.querySelector(`.port[data-port="${CSS.escape(pid)}"]`);
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
   svg.querySelectorAll("g[data-bt]").forEach((g) => {
     g.addEventListener("mouseenter", () => hlBt(g.dataset.bt, true));
     g.addEventListener("mouseleave", () => hlBt(g.dataset.bt, false));
@@ -652,6 +753,15 @@ function renderChassis(snap) {
           baseY: parseFloat(g.dataset.basey),
           baseStripX: parseFloat(g.dataset.basex),
         };
+      });
+      g.addEventListener("dblclick", async () => {
+        const label = prompt("Slot label:", g.dataset.label || "");
+        if (label !== null && label.trim() !== "")
+          await fetch(`/api/slot/${encodeURIComponent(g.dataset.slot)}/label`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ label: label.trim() }),
+          });
       });
       return;
     }

@@ -17,11 +17,35 @@ _V4L2_BUF_TYPE_VIDEO_CAPTURE = 1
 _GREY_FOURCC = {"GREY", "Y8  ", "Y10 ", "Y12 ", "Y16 ", "Y8I ", "Z16 "}
 
 
+# per-node open counts, maintained by the server's inotify watcher on
+# /dev/video*; used to attribute module-level streaming to one camera
+VIDEO_OPEN_COUNTS: dict[str, int] = {}
+
+
+def _camera_in_use(node: str, module_active: bool | None) -> bool | None:
+    """The USB power state says the *module* streams; open counts (when
+    we have observed any) say which node is actually held open."""
+    if not module_active:
+        return module_active  # False, or None when undetectable
+    counts = VIDEO_OPEN_COUNTS
+    if not counts or all(v == 0 for v in counts.values()):
+        return True  # no open-tracking data: module-level fallback
+    return counts.get(node, 0) > 0
+
+
+_formats_cache: dict[str, list[str] | None] = {}
+
+
 def _pixel_formats(node: str) -> list[str] | None:
-    """Fourcc list of a video device, None if the node is unreadable."""
+    """Fourcc list of a video device, None if the node is unreadable.
+    Cached after the first successful read: opening the node resumes the
+    (runtime-suspended) camera, so we must not do it on every probe."""
+    if node in _formats_cache and _formats_cache[node] is not None:
+        return _formats_cache[node]
     try:
         f = open(f"/dev/{node}", "rb", buffering=0)
     except OSError:
+        _formats_cache[node] = None
         return None
     formats = []
     with f:
@@ -33,6 +57,7 @@ def _pixel_formats(node: str) -> list[str] | None:
             except OSError:  # EINVAL: past the last format
                 break
             formats.append(buf[44:48].decode("ascii", "replace"))
+    _formats_cache[node] = formats
     return formats
 
 
@@ -52,6 +77,13 @@ def cameras() -> list[dict]:
         iface = re.search(r"/(\d+-[\d.]+:\d+\.\d+)(?=/|$)", os.path.realpath(path))
         node = os.path.basename(path)
         usb_parent = _usb_parent(path)
+        # read BEFORE probing formats: our own open would resume the device
+        module_active = None
+        if usb_parent:
+            status = read(f"/sys/bus/usb/devices/{usb_parent}/power/runtime_status")
+            if status:
+                module_active = status == "active"
+        in_use = _camera_in_use(node, module_active)
         # the USB product string is cleaner than the 31-char-truncated
         # v4l2 name
         name = None
@@ -72,6 +104,7 @@ def cameras() -> list[dict]:
                 "usb_interface": iface.group(1) if iface else None,
                 "formats": formats,
                 "infrared": infrared,
+                "in_use": in_use,
             }
         )
     return cams

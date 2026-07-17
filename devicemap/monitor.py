@@ -51,6 +51,68 @@ def start_rtnetlink_watcher(loop, on_event) -> list:
     return [lambda: (loop.remove_reader(sock.fileno()), sock.close())]
 
 
+def start_video_watchers(loop, on_event) -> list:
+    """inotify on /dev/video* to count opens/closes per node (visible for
+    any process), so module-level camera streaming can be attributed to
+    the node actually in use."""
+    import ctypes
+    import glob
+    import os
+    import struct
+
+    from .probes import media
+
+    IN_NONBLOCK = 0x800
+    IN_OPEN = 0x20
+    IN_CLOSE = 0x08 | 0x10  # CLOSE_WRITE | CLOSE_NOWRITE
+
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        fd = libc.inotify_init1(IN_NONBLOCK)
+    except OSError:
+        return []
+    if fd < 0:
+        return []
+    wd_map: dict[int, str] = {}
+    for path in sorted(glob.glob("/dev/video*")):
+        wd = libc.inotify_add_watch(fd, path.encode(), IN_OPEN | IN_CLOSE)
+        if wd >= 0:
+            node = os.path.basename(path)
+            wd_map[wd] = node
+            media.VIDEO_OPEN_COUNTS.setdefault(node, 0)
+    if not wd_map:
+        os.close(fd)
+        return []
+
+    def ready():
+        try:
+            data = os.read(fd, 4096)
+        except (BlockingIOError, OSError):
+            return
+        changed = False
+        offset = 0
+        while offset + 16 <= len(data):
+            wd, mask, _cookie, name_len = struct.unpack_from("iIII", data, offset)
+            offset += 16 + name_len
+            node = wd_map.get(wd)
+            if not node:
+                continue
+            counts = media.VIDEO_OPEN_COUNTS
+            if mask & IN_OPEN:
+                counts[node] = counts.get(node, 0) + 1
+                changed = True
+            elif mask & IN_CLOSE:
+                counts[node] = max(0, counts.get(node, 0) - 1)
+                changed = True
+        if changed:
+            on_event(
+                {"action": "video-open", "devpath": "", "subsystem": "video4linux"}
+            )
+
+    loop.add_reader(fd, ready)
+    return [lambda: (loop.remove_reader(fd), os.close(fd))]
+
+
 def start_jack_watchers(loop, on_event) -> list:
     """Watch jack switch input devices for plug/unplug events (jack
     insertion produces evdev events, not udev events). Feature-detected:

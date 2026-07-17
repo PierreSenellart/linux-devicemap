@@ -15,6 +15,10 @@ import re
 BASE = os.path.dirname(os.path.dirname(__file__))
 LAYOUTS = os.path.join(BASE, "layouts")
 PROFILES = os.path.join(BASE, "profiles")
+CACHE = os.path.join(BASE, "layouts-cache")
+REGISTRY_RAW = (
+    "https://raw.githubusercontent.com/PierreSenellart/linux-devicemap/main/layouts"
+)
 
 # slot types with no kernel-visible state (nothing to bind or calibrate)
 PASSIVE_TYPES = {"sim", "lock", "smartcard"}
@@ -50,6 +54,66 @@ def save_binding(machine: dict, slot_id: str, binding: dict) -> None:
     profile = _load_json(_profile_path(machine)) or {}
     profile.setdefault("bindings", {})[slot_id] = binding
     _save_profile(machine, profile)
+
+
+def save_label(machine: dict, slot_id: str, label: str) -> None:
+    profile = _load_json(_profile_path(machine)) or {}
+    profile.setdefault("slots", {}).setdefault(slot_id, {})["label"] = label
+    _save_profile(machine, profile)
+
+
+def set_hidden(machine: dict, port_id: str, hidden: bool) -> None:
+    """Locally hide/unhide a connector, on top of the layout's own list."""
+    profile = _load_json(_profile_path(machine)) or {}
+    h = profile.setdefault("hidden", {"add": [], "remove": []})
+    for lst, member in (("add", hidden), ("remove", not hidden)):
+        entries = h.setdefault(lst, [])
+        if member and port_id not in entries:
+            entries.append(port_id)
+        if not member and port_id in entries:
+            entries.remove(port_id)
+    _save_profile(machine, profile)
+
+
+def add_slot(machine: dict, port: dict) -> None:
+    """Promote an unplaced port to a locally-added slot (draggable like
+    any other; export bakes it into the shared layout)."""
+    profile = _load_json(_profile_path(machine)) or {}
+    profile.setdefault("extra_slots", {})[port["id"]] = {
+        "id": port["id"],
+        "type": port["kind"],
+        "label": f"{port['kind']} ({port['id']})",
+        "side": "left",
+        "pos": 0.9,
+        "binding": binding_for_port(port),
+    }
+    _save_profile(machine, profile)
+
+
+def remove_extra_slot(machine: dict, slot_id: str) -> bool:
+    profile = _load_json(_profile_path(machine)) or {}
+    removed = profile.get("extra_slots", {}).pop(slot_id, None) is not None
+    profile.get("slots", {}).pop(slot_id, None)  # drop its drag overrides too
+    _save_profile(machine, profile)
+    return removed
+
+
+def refresh_from_registry(machine: dict) -> bool:
+    """Fetch this machine's layout from the online registry (the repo's
+    main branch) into the local cache. Explicit user action only."""
+    import urllib.request
+
+    key = dmi_key(machine)
+    try:
+        with urllib.request.urlopen(f"{REGISTRY_RAW}/{key}.json", timeout=10) as r:
+            data = r.read()
+        json.loads(data)  # validate before caching
+    except Exception:
+        return False
+    os.makedirs(CACHE, exist_ok=True)
+    with open(f"{CACHE}/{key}.json", "wb") as f:
+        f.write(data)
+    return True
 
 
 def reset_slots(machine: dict) -> None:
@@ -105,7 +169,7 @@ def load(machine: dict, snap: dict | None = None) -> dict | None:
     """Layout for this machine (registry entry, or skeleton if `snap` is
     given), with profile bindings and slot overrides merged in."""
     key = dmi_key(machine)
-    lay = _load_json(f"{LAYOUTS}/{key}.json")
+    lay = _load_json(f"{LAYOUTS}/{key}.json") or _load_json(f"{CACHE}/{key}.json")
     if not lay:
         if snap is None:
             return None
@@ -113,6 +177,12 @@ def load(machine: dict, snap: dict | None = None) -> dict | None:
     profile = _load_json(f"{PROFILES}/{key}.json") or {}
     bindings = profile.get("bindings", {})
     overrides = profile.get("slots", {})
+    hidden_edits = profile.get("hidden", {})
+    lay["hidden"] = [
+        h
+        for h in dict.fromkeys(lay.get("hidden", []) + hidden_edits.get("add", []))
+        if h not in hidden_edits.get("remove", [])
+    ]
     new_sides: dict[str, list] = {side: [] for side in lay.get("sides", {})}
     for side, slots in lay.get("sides", {}).items():
         for slot in slots:
@@ -121,10 +191,21 @@ def load(machine: dict, snap: dict | None = None) -> dict | None:
             override = overrides.get(slot["id"])
             if override:
                 slot["pos"] = override.get("pos", slot["pos"])
+                slot["label"] = override.get("label", slot.get("label"))
                 side_final = override.get("side", side)
             else:
                 side_final = side
             new_sides.setdefault(side_final, []).append(slot)
+    for sid, extra in profile.get("extra_slots", {}).items():
+        slot = {k: v for k, v in extra.items() if k != "side"}
+        slot["extra"] = True
+        side_final = extra.get("side", "left")
+        override = overrides.get(sid)
+        if override:
+            slot["pos"] = override.get("pos", slot["pos"])
+            slot["label"] = override.get("label", slot.get("label"))
+            side_final = override.get("side", side_final)
+        new_sides.setdefault(side_final, []).append(slot)
     lay["sides"] = {
         s: sorted(slots, key=lambda x: x["pos"]) for s, slots in new_sides.items()
     }
@@ -140,7 +221,8 @@ def export(snap: dict) -> dict:
     sides = {}
     for side, slots in lay.get("sides", {}).items():
         sides[side] = [
-            {k: v for k, v in slot.items() if k != "port_id"} for slot in slots
+            {k: v for k, v in slot.items() if k not in ("port_id", "extra")}
+            for slot in slots
         ]
     return {
         "dmi": lay.get("dmi")

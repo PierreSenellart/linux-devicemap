@@ -126,20 +126,35 @@ What probing established, and the design consequences:
 - Layout *authoring* from manufacturer docs is a maintainer workflow
   outside the runtime (any tools welcome there). No LLM or extraction
   logic embedded in the software.
-- Status: core done — kernel-derived skeleton for machines without a
-  registry entry (status "skeleton", auto-bindings included), drag
-  position/side editor in the UI ("edit layout", overrides persisted in
-  the profile), export endpoint (`GET /api/layout/export`) producing a
-  clean registry entry with local edits promoted. Remaining: the
-  optional between-releases "refresh layouts" fetch; in-app editing of
-  the `hidden` list and slot labels (today JSON-side); a "reset to
-  registry layout" action (drop the profile's `slots` overrides) and a
-  visible hint when local position edits shadow the shipped layout.
+- Status: done — kernel-derived skeleton for machines without a registry
+  entry (status "skeleton", auto-bindings included), drag position/side
+  editor ("edit layout"), slot rename (double-click in edit mode),
+  hide/unhide of unplaced connectors, export endpoint producing a clean
+  registry entry, reset-to-registry/skeleton with a "locally edited"
+  indicator, and "refresh from registry" (fetches this model's layout
+  from the repo's main branch into `layouts-cache/`, explicit user
+  action only; local `layouts/` takes precedence).
 
-### M5 – polish
-- Docks/hubs as satellite boxes with their subtree; camera/mic in-use
-  indicators; EDID monitor names on outputs; vendor plugins (e.g. Dell
-  adapter wattage); Tauri wrapper if a desktop app shell is wanted.
+### M5 – polish (largely done)
+- Done: hubs/docks as satellite boxes below the chassis (children as
+  icons, elbow-linked to their port, hover-linked to the port card);
+  camera/mic/speaker in-use indicators (module streaming via USB
+  `power/runtime_status`, which flips only on actual streaming — bulk
+  UVC exposes nothing per function, so attribution to RGB vs IR uses an
+  inotify open/close counter on `/dev/video*`, with module-level
+  fallback for streams predating the daemon; audio via `/proc/asound`
+  PCM state; a 2 s activity poll since none of these emit udev events;
+  camera dot glows red on the bezel); EDID monitor
+  names (0xFC descriptor, 0xFE panel part number as fallback);
+  peripherals behind wireless receivers via input-device correlation
+  (`/proc/bus/input` sysfs paths → USB parent; e.g. the mouse paired to
+  a Logitech receiver). Receiver battery levels would need HID++
+  (solaar-style, /dev/hidraw) — not planned.
+- Declined: systemd service (on-demand launch preferred); Tauri wrapper.
+- Possible later: vendor plugins (e.g. Dell adapter wattage), USB
+  under-speed warnings (device negotiating far below port speed), a
+  "server updated — reload" banner for long-lived tabs running stale
+  frontend code (the WebSocket reconnect already detects restarts).
 
 ## Audio-jack access
 

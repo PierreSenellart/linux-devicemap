@@ -38,12 +38,41 @@ def _parse_proc_input() -> list[dict]:
     for block in blocks:
         name_m = re.search(r'^N: Name="(.*)"$', block, re.M)
         handlers_m = re.search(r"^H: Handlers=(.*)$", block, re.M)
+        sysfs_m = re.search(r"^S: Sysfs=(.*)$", block, re.M)
         if not name_m:
             continue
         handlers = (handlers_m.group(1) if handlers_m else "").split()
         event = next((h for h in handlers if h.startswith("event")), None)
-        devices.append({"name": name_m.group(1), "event": event})
+        devices.append(
+            {
+                "name": name_m.group(1),
+                "event": event,
+                "sysfs": sysfs_m.group(1) if sysfs_m else "",
+            }
+        )
     return devices
+
+
+def usb_inputs() -> dict[str, list[str]]:
+    """USB device sysname → input device names it provides. This is what
+    reveals peripherals paired behind a wireless receiver (they appear as
+    separate input devices nested under the receiver's HID path)."""
+    out: dict[str, list[str]] = {}
+    for dev in _parse_proc_input():
+        parents = re.findall(r"/(\d+-[\d.]+)[/:]", dev["sysfs"])
+        if not parents:
+            continue
+        names = out.setdefault(parents[-1], [])
+        if dev["name"] not in names:
+            names.append(dev["name"])
+    # drop "<base name> Consumer Control"-style per-function variants
+    for parent, names in out.items():
+        out[parent] = [
+            n
+            for n in names
+            if not any(n != o and n.startswith(o + " ") for o in names)
+        ]
+    return out
 
 
 def jack_state(event: str | None) -> dict:

@@ -144,6 +144,27 @@ h2 .note { font-weight: normal; color: var(--muted); font-size: 0.8rem; }
   padding: 0 0.45rem;
   margin-top: 0.15rem;
 }
+.inuse { color: #dc2626; font-size: 0.78rem; white-space: nowrap; }
+@media (prefers-color-scheme: dark) { .inuse { color: #f87171; } }
+svg circle.camuse {
+  fill: #dc2626;
+  animation: flow 1s ease-in-out infinite alternate;
+}
+svg .satlink { stroke: var(--chassis-line); fill: none; stroke-dasharray: 4 3; }
+.satellite { color: var(--muted); }
+.satellite .marker { fill: var(--panel); stroke: var(--chassis-line); }
+.hidebtn,
+.placebtn {
+  font: inherit;
+  font-size: 0.72rem;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  cursor: pointer;
+  margin-top: 0.2rem;
+}
 svg .pwr-in { fill: var(--ok); animation: flow 1s ease-in-out infinite alternate; }
 svg .pwr-out { fill: var(--warn); animation: flow 1s ease-in-out infinite alternate; }
 @keyframes flow {
