@@ -1,5 +1,10 @@
 """Chassis layouts (per-model port geometry) and machine profiles
-(locally calibrated bindings overriding the layout's defaults)."""
+(locally calibrated bindings and position edits overriding the layout).
+
+`layouts/` is the community registry (inert JSON keyed by DMI slug).
+When a machine has no entry, a *skeleton* layout is derived from the
+kernel's own port list so the editor and calibration wizard can build a
+real layout from scratch."""
 
 from __future__ import annotations
 
@@ -13,6 +18,8 @@ PROFILES = os.path.join(BASE, "profiles")
 
 # slot types with no kernel-visible state (nothing to bind or calibrate)
 PASSIVE_TYPES = {"sim", "lock", "smartcard"}
+
+_SKELETON_KINDS = ("usb-c", "usb-a", "hdmi", "dp", "vga", "dvi", "sd", "audio-jack")
 
 
 def dmi_key(machine: dict) -> str:
@@ -28,30 +35,124 @@ def _load_json(path: str) -> dict | None:
         return None
 
 
-def load(machine: dict) -> dict | None:
-    """Layout for this machine, with profile bindings merged in."""
-    key = dmi_key(machine)
-    lay = _load_json(f"{LAYOUTS}/{key}.json")
-    if not lay:
-        return None
-    profile = _load_json(f"{PROFILES}/{key}.json") or {}
-    bindings = profile.get("bindings", {})
-    for slots in lay.get("sides", {}).values():
-        for slot in slots:
-            if slot["id"] in bindings:
-                slot["binding"] = bindings[slot["id"]]
-    lay["key"] = key
-    return lay
+def _profile_path(machine: dict) -> str:
+    return f"{PROFILES}/{dmi_key(machine)}.json"
+
+
+def _save_profile(machine: dict, profile: dict) -> None:
+    os.makedirs(PROFILES, exist_ok=True)
+    with open(_profile_path(machine), "w") as f:
+        json.dump(profile, f, indent=1)
+        f.write("\n")
 
 
 def save_binding(machine: dict, slot_id: str, binding: dict) -> None:
-    os.makedirs(PROFILES, exist_ok=True)
-    path = f"{PROFILES}/{dmi_key(machine)}.json"
-    profile = _load_json(path) or {}
+    profile = _load_json(_profile_path(machine)) or {}
     profile.setdefault("bindings", {})[slot_id] = binding
-    with open(path, "w") as f:
-        json.dump(profile, f, indent=1)
-        f.write("\n")
+    _save_profile(machine, profile)
+
+
+def reset_slots(machine: dict) -> None:
+    """Drop local position/side overrides, restoring registry geometry.
+    Calibration bindings are kept."""
+    profile = _load_json(_profile_path(machine)) or {}
+    profile.pop("slots", None)
+    _save_profile(machine, profile)
+
+
+def save_slot(machine: dict, slot_id: str, side: str | None, pos: float) -> None:
+    profile = _load_json(_profile_path(machine)) or {}
+    entry = profile.setdefault("slots", {}).setdefault(slot_id, {})
+    if side:
+        entry["side"] = side
+    entry["pos"] = round(max(0.0, min(0.95, pos)), 3)
+    _save_profile(machine, profile)
+
+
+def skeleton(snap: dict) -> dict:
+    """Derive a draft layout from the kernel's port list alone: correct
+    slots and bindings, made-up geometry (all evenly spread, to be
+    dragged into place by the user)."""
+    slots = []
+    for port in snap.get("ports", []):
+        if port.get("kind") not in _SKELETON_KINDS:
+            continue
+        binding = binding_for_port(port)
+        slots.append(
+            {
+                "id": port["id"],
+                "type": port["kind"],
+                "label": f"{port['kind']} ({port['id']})",
+                "pos": 0.0,
+                "binding": binding,
+            }
+        )
+    half = (len(slots) + 1) // 2
+    for i, slot in enumerate(slots):
+        slot["pos"] = round(0.05 + (i if i < half else i - half) * 0.12, 2)
+    return {
+        "dmi": {
+            "vendor": snap.get("machine", {}).get("vendor"),
+            "product": snap.get("machine", {}).get("product"),
+        },
+        "status": "skeleton",
+        "hidden": [],
+        "sides": {"left": slots[:half], "right": slots[half:]},
+    }
+
+
+def load(machine: dict, snap: dict | None = None) -> dict | None:
+    """Layout for this machine (registry entry, or skeleton if `snap` is
+    given), with profile bindings and slot overrides merged in."""
+    key = dmi_key(machine)
+    lay = _load_json(f"{LAYOUTS}/{key}.json")
+    if not lay:
+        if snap is None:
+            return None
+        lay = skeleton(snap)
+    profile = _load_json(f"{PROFILES}/{key}.json") or {}
+    bindings = profile.get("bindings", {})
+    overrides = profile.get("slots", {})
+    new_sides: dict[str, list] = {side: [] for side in lay.get("sides", {})}
+    for side, slots in lay.get("sides", {}).items():
+        for slot in slots:
+            if slot["id"] in bindings:
+                slot["binding"] = bindings[slot["id"]]
+            override = overrides.get(slot["id"])
+            if override:
+                slot["pos"] = override.get("pos", slot["pos"])
+                side_final = override.get("side", side)
+            else:
+                side_final = side
+            new_sides.setdefault(side_final, []).append(slot)
+    lay["sides"] = {
+        s: sorted(slots, key=lambda x: x["pos"]) for s, slots in new_sides.items()
+    }
+    lay["key"] = key
+    lay["edited"] = bool(overrides)
+    return lay
+
+
+def export(snap: dict) -> dict:
+    """Shareable registry entry: current layout with local bindings and
+    position edits promoted in, computed/local-only fields stripped."""
+    lay = load(snap["machine"], snap) or {}
+    sides = {}
+    for side, slots in lay.get("sides", {}).items():
+        sides[side] = [
+            {k: v for k, v in slot.items() if k != "port_id"} for slot in slots
+        ]
+    return {
+        "dmi": lay.get("dmi")
+        or {
+            "vendor": snap["machine"].get("vendor"),
+            "product": snap["machine"].get("product"),
+        },
+        "status": "draft" if lay.get("status") == "skeleton" else lay.get("status"),
+        "hidden": lay.get("hidden", []),
+        "source": lay.get("source"),
+        "sides": sides,
+    }
 
 
 def _matches(binding: dict | None, port: dict) -> bool:
@@ -87,7 +188,7 @@ def binding_for_port(port: dict) -> dict | None:
 
 def compose(snap: dict, calibration: dict | None) -> dict:
     """Layout section of the published state: slots resolved to ports."""
-    lay = load(snap["machine"])
+    lay = load(snap["machine"], snap)
     if not lay:
         return {"available": False}
     out = {
@@ -99,6 +200,7 @@ def compose(snap: dict, calibration: dict | None) -> dict:
         # connectors with no physical plug (phantom or alt-mode paths):
         # the UI hides them while disconnected
         "hidden": lay.get("hidden", []),
+        "edited": lay.get("edited", False),
         "calibration": calibration,
     }
     for side, slots in lay.get("sides", {}).items():

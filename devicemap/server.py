@@ -9,7 +9,7 @@ import contextlib
 import json
 import os
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -171,6 +171,31 @@ async def calibrate_cancel() -> JSONResponse:
     hub.calibration = None
     await hub.refresh(reason=[{"action": "calibrate-cancel", "subsystem": "layout"}])
     return JSONResponse({"armed": None})
+
+
+@app.post("/api/slot/{slot_id}/position")
+async def slot_position(slot_id: str, payload: dict = Body(...)) -> JSONResponse:
+    layout.save_slot(
+        hub.raw["machine"], slot_id, payload.get("side"), float(payload["pos"])
+    )
+    await hub.refresh(reason=[{"action": "move-slot", "subsystem": "layout"}])
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/layout/reset")
+async def layout_reset() -> JSONResponse:
+    layout.reset_slots(hub.raw["machine"])
+    await hub.refresh(reason=[{"action": "reset-layout", "subsystem": "layout"}])
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/layout/export")
+async def layout_export() -> JSONResponse:
+    key = layout.dmi_key(hub.raw.get("machine", {}))
+    return JSONResponse(
+        layout.export(hub.raw),
+        headers={"Content-Disposition": f'attachment; filename="{key}.json"'},
+    )
 
 
 @app.websocket("/ws")

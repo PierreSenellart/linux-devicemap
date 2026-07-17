@@ -214,6 +214,11 @@ svg .strip { fill: var(--chassis); stroke: var(--chassis-line); }
 }
 .slot { cursor: pointer; }
 svg .slotlabel { font-size: 10px; fill: var(--text); }
+.slot.editable { cursor: grab; }
+.slot.editable:active { cursor: grabbing; }
+#tools { display: inline-flex; gap: 0.5rem; align-items: center; }
+#tools a.chip { text-decoration: none; }
+#tools button,
 #wizard button {
   font: inherit;
   font-size: 0.85rem;

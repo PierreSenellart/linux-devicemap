@@ -133,10 +133,15 @@ function netHtml(dev) {
 }
 
 let prevConnected = {}; // port id → bool, to pulse on change
+let editMode = false;
+let drag = null; // {slotId, g, baseX, baseY} while dragging
+let pendingSnap = null; // snapshot deferred during a drag
+let lastSnap = null;
 
 let batteryActive = false; // charging, or discharging while on AC
 
 function render(snap) {
+  lastSnap = snap;
   const bat = ((snap.power || {}).batteries || [])[0];
   batteryActive =
     !!bat &&
@@ -163,16 +168,52 @@ function render(snap) {
   const lay = snap.layout || {};
   $("ports-note").textContent = !lay.available
     ? "no layout for this machine — positions unknown"
-    : lay.unbound && lay.unbound.length
-      ? `${lay.unbound.length} port(s) not calibrated`
-      : lay.status === "draft"
-        ? "layout: draft"
-        : "";
+    : lay.status === "skeleton"
+      ? "no registry layout — skeleton derived from the kernel; drag ports into place (edit layout)"
+      : lay.unbound && lay.unbound.length
+        ? `${lay.unbound.length} port(s) not calibrated`
+        : lay.status === "draft"
+          ? "layout: draft"
+          : "";
+  if (lay.available && lay.edited)
+    $("ports-note").textContent += (
+      $("ports-note").textContent ? " · " : ""
+    ) + "locally edited positions";
   renderPorts(snap.ports || [], lay);
   renderBuiltins(snap.builtins || []);
   renderWireless(snap.bluetooth);
   renderChassis(snap);
   renderWizard(snap);
+  renderTools(snap);
+}
+
+function renderTools(snap) {
+  const t = $("tools");
+  const lay = snap.layout || {};
+  if (!lay.available) {
+    t.replaceChildren();
+    return;
+  }
+  t.innerHTML =
+    `<button id="editbtn">${editMode ? "done editing" : "edit layout"}</button>` +
+    (editMode
+      ? ` <a id="exportlink" class="chip" href="/api/layout/export" download>export layout</a>` +
+        (lay.edited
+          ? ` <button id="resetbtn">reset positions</button>`
+          : "")
+      : "");
+  $("editbtn").onclick = () => {
+    editMode = !editMode;
+    if (lastSnap) render(lastSnap);
+  };
+  const resetBtn = $("resetbtn");
+  if (resetBtn)
+    resetBtn.onclick = async () => {
+      const base =
+        lay.status === "skeleton" ? "the kernel-derived skeleton" : "the registry layout";
+      if (confirm(`Discard local position edits and restore ${base}?`))
+        await fetch("/api/layout/reset", { method: "POST" });
+    };
 }
 
 function slotOfPort(lay, portId) {
@@ -558,7 +599,8 @@ function renderChassis(snap) {
             : `<text class="slotlabel" x="${lx}" y="${y + 15}" text-anchor="end">${esc(label)}</text>`
           : "";
         inner +=
-          `<g class="${cls}" data-slot="${esc(s.id)}" data-portid="${esc(s.port_id || "")}">` +
+          `<g class="${cls}${editMode ? " editable" : ""}" data-slot="${esc(s.id)}" ` +
+          `data-portid="${esc(s.port_id || "")}" data-basex="${x}" data-basey="${y}">` +
           `<rect class="marker" x="${x + 4}" y="${y}" width="26" height="22" rx="4"/>` +
           iconAt(SLOT_ICON[s.type] || "plug", x + 9, y + 3, 16) +
           arrow +
@@ -601,6 +643,18 @@ function renderChassis(snap) {
     g.addEventListener("mouseleave", () => hlBuiltin(g.dataset.builtin, false));
   });
   svg.querySelectorAll("g[data-slot]").forEach((g) => {
+    if (editMode) {
+      g.addEventListener("pointerdown", (evt) => {
+        evt.preventDefault();
+        drag = {
+          slotId: g.dataset.slot,
+          g,
+          baseY: parseFloat(g.dataset.basey),
+          baseStripX: parseFloat(g.dataset.basex),
+        };
+      });
+      return;
+    }
     if (g.classList.contains("unbound"))
       g.addEventListener("click", () => armSlot(g.dataset.slot));
     const pid = g.dataset.portid;
@@ -666,6 +720,42 @@ function logEvents(events) {
   while (ul.children.length > 100) ul.removeChild(ul.lastChild);
 }
 
+const STRIP_X = { left: 18, right: 588 };
+
+function svgPos(evt) {
+  const svg = $("chassis");
+  const pt = new DOMPoint(evt.clientX, evt.clientY);
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+document.addEventListener("pointermove", (evt) => {
+  if (!drag) return;
+  const p = svgPos(evt);
+  drag.side = p.x < 320 ? "left" : "right";
+  drag.pos = Math.max(0, Math.min(0.95, (p.y - 49) / 296));
+  const dx = STRIP_X[drag.side] - drag.baseStripX;
+  const dy = 38 + drag.pos * 296 - drag.baseY;
+  drag.g.setAttribute("transform", `translate(${dx},${dy})`);
+});
+
+document.addEventListener("pointerup", async () => {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+  if (d.side !== undefined) {
+    await fetch(`/api/slot/${encodeURIComponent(d.slotId)}/position`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ side: d.side, pos: d.pos }),
+    });
+  }
+  if (pendingSnap) {
+    const s = pendingSnap;
+    pendingSnap = null;
+    render(s);
+  }
+});
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -679,7 +769,11 @@ function connect() {
   ws.onmessage = (msg) => {
     const data = JSON.parse(msg.data);
     if (data.type === "snapshot") {
-      render(data.data);
+      if (drag) {
+        pendingSnap = data.data; // don't re-render under the user's cursor
+      } else {
+        render(data.data);
+      }
       logEvents(data.events);
     }
   };

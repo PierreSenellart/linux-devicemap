@@ -109,7 +109,7 @@ What probing established, and the design consequences:
   PropertiesChanged D-Bus subscription would make those instant — noted
   as optional polish).
 
-### M4 – layout contributions (no LLM, no service: `layouts/` IS the registry)
+### M4 – layout contributions (no LLM, no service: `layouts/` IS the registry) — core done
 - `layouts/` in this repo is the registry, hwdb-style: inert JSON keyed
   by DMI slug, contributed via ordinary PRs, reviewed and versioned with
   the schema, shipped with the software → lookup is a local file read.
@@ -126,6 +126,15 @@ What probing established, and the design consequences:
 - Layout *authoring* from manufacturer docs is a maintainer workflow
   outside the runtime (any tools welcome there). No LLM or extraction
   logic embedded in the software.
+- Status: core done — kernel-derived skeleton for machines without a
+  registry entry (status "skeleton", auto-bindings included), drag
+  position/side editor in the UI ("edit layout", overrides persisted in
+  the profile), export endpoint (`GET /api/layout/export`) producing a
+  clean registry entry with local edits promoted. Remaining: the
+  optional between-releases "refresh layouts" fetch; in-app editing of
+  the `hidden` list and slot labels (today JSON-side); a "reset to
+  registry layout" action (drop the profile's `slots` overrides) and a
+  visible hint when local position edits shadow the shipped layout.
 
 ### M5 – polish
 - Docks/hubs as satellite boxes with their subtree; camera/mic in-use
