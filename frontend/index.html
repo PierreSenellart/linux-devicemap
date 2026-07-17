@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>devicemap</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>devicemap</h1>
+  <div id="machine" class="machine">…</div>
+  <div id="powerchip" class="chip">…</div>
+  <div id="connstate" class="chip">connecting…</div>
+</header>
+<main>
+  <section class="panel" id="chassis-panel">
+    <h2>Machine</h2>
+    <svg id="chassis" viewBox="0 0 420 340" role="img" aria-label="laptop schematic"></svg>
+    <ul id="builtins" class="builtins"></ul>
+  </section>
+  <section class="panel">
+    <h2>Ports <span class="note">positions not calibrated yet</span></h2>
+    <div id="ports" class="ports"></div>
+    <h2>Events</h2>
+    <ul id="events" class="events"></ul>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
