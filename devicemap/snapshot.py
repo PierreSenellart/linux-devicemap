@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+import re
 import time
 
-from .probes import audio, block, dmi, drm, inputs, media, mmc, net, power, typec, usb
+from .probes import (
+    audio,
+    block,
+    bt,
+    dmi,
+    drm,
+    inputs,
+    media,
+    mmc,
+    net,
+    power,
+    system,
+    typec,
+    usb,
+)
 
 
 def _attach(device: dict | None, key: str, by_parent: dict) -> None:
@@ -24,6 +39,29 @@ def _attach(device: dict | None, key: str, by_parent: dict) -> None:
         _attach(child, key, by_parent)
 
 
+def _num(value: str | None) -> float | None:
+    """'3000mA' → 3000.0"""
+    if not value:
+        return None
+    m = re.match(r"(\d+)", value)
+    return float(m.group(1)) if m else None
+
+
+def _pdo_watts(pdos: list[dict] | None) -> float | None:
+    """Highest wattage offered/accepted across a PDO list."""
+    best = None
+    for pdo in pdos or []:
+        mv = _num(pdo.get("voltage")) or _num(pdo.get("maximum_voltage"))
+        ma = _num(pdo.get("operational_current")) or _num(pdo.get("maximum_current"))
+        if mv and ma:
+            best = max(best or 0.0, mv * ma / 1e6)
+    return round(best, 1) if best else None
+
+
+# wattage implied by non-PD Type-C current modes (at 5 V)
+_MODE_WATTS = {"3.0A": 15.0, "1.5A": 7.5, "default": 2.5}
+
+
 def build() -> dict:
     usb_info = usb.probe()
     typec_info = typec.probe()
@@ -36,7 +74,8 @@ def build() -> dict:
     for iface in net_info:
         if iface["usb_parent"]:
             net_by_parent.setdefault(iface["usb_parent"], []).append(iface)
-    block_by_parent = block.probe()
+    block_info = block.probe()
+    block_by_parent = block_info["usb"]
 
     ports = []
 
@@ -54,6 +93,14 @@ def build() -> dict:
                 "source_pdos": (tc["partner"] or {}).get("source_pdos"),
                 "sink_pdos": tc["sink_pdos"],
             }
+            pw = port["power"]
+            pw["watts_max_in"] = _pdo_watts(tc["sink_pdos"])
+            pw["watts_in"] = None
+            if pw["role"] == "sink" and pw["partner_present"]:
+                if pw["mode"] == "usb_power_delivery":
+                    pw["watts_in"] = _pdo_watts(pw["source_pdos"])
+                else:
+                    pw["watts_in"] = _MODE_WATTS.get(pw["mode"])
             # a power-only partner (charger) occupies the port even though
             # no USB device enumerates
             port["connected"] = port["device"] is not None or tc["partner"] is not None
@@ -105,7 +152,24 @@ def build() -> dict:
         )
 
     cams, bts = media.cameras(), media.bluetooth()
-    builtins = list(input_info["builtins"]) + cams + bts + audio.probe()
+    bt_info = bt.probe()
+    if bt_info["available"]:
+        aliases = {a["id"]: a for a in bt_info["adapters"]}
+        n_connected = sum(1 for d in bt_info["devices"] if d["connected"])
+        for b in bts:
+            a = aliases.get(b["name"])
+            if a:
+                b["name"] = f"{a['alias'] or b['name']}"
+                b["status"] = (
+                    f"{n_connected} connected" if a["powered"] else "off"
+                )
+    builtins = (
+        list(input_info["builtins"])
+        + cams
+        + bts
+        + audio.probe()
+        + block_info["internal"]
+    )
     for iface in net_info:
         if not iface["usb_parent"]:
             builtins.append({"kind": iface["kind"], "name": iface["ifname"], **iface})
@@ -129,9 +193,10 @@ def build() -> dict:
 
     return {
         "ts": time.time(),
-        "machine": dmi.probe(),
+        "machine": {**dmi.probe(), **system.probe()},
         "ports": ports,
         "builtins": builtins,
+        "bluetooth": bt_info,
         "power": {
             "ac_online": power_info["ac_online"],
             "batteries": power_info["batteries"],

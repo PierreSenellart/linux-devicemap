@@ -38,6 +38,7 @@ const BUILTIN_LABEL = {
   ethernet: "Ethernet",
   speaker: "Speakers",
   microphone: "Microphone",
+  disk: "Drive",
 };
 
 const PORT_ICON = {
@@ -61,7 +62,15 @@ const BUILTIN_ICON = {
   ethernet: "ethernet-port",
   speaker: "speaker",
   microphone: "mic",
+  disk: "hard-drive",
 };
+
+function mountsLabel(mounts, max = 3) {
+  if (!mounts || !mounts.length) return "";
+  const pts = mounts.map((m) => m.mountpoint);
+  const shown = pts.slice(0, max).join(" ");
+  return pts.length > max ? `${shown} +${pts.length - max}` : shown;
+}
 
 function icon(name) {
   return (typeof ICONS !== "undefined" && ICONS[name]) || "";
@@ -91,11 +100,13 @@ function storageHtml(dev) {
   if (!dev.storage || !dev.storage.length) return "";
   return dev.storage
     .map((s) => {
-      const state = s.media
+      let state = s.media
         ? `${s.size_gb} GB`
         : s.removable
           ? "empty (no media)"
           : "no media";
+      const mts = mountsLabel(s.mounts);
+      if (mts) state += ` · ${mts}`;
       return `<div class="sub net">${icon("hard-drive")} ${esc(s.dev)} · ${esc(state)}</div>`;
     })
     .join("");
@@ -123,9 +134,31 @@ function netHtml(dev) {
 
 let prevConnected = {}; // port id → bool, to pulse on change
 
+let batteryActive = false; // charging, or discharging while on AC
+
 function render(snap) {
+  const bat = ((snap.power || {}).batteries || [])[0];
+  batteryActive =
+    !!bat &&
+    (bat.status === "Charging" ||
+      (bat.status === "Discharging" && (snap.power || {}).ac_online));
   const m = snap.machine || {};
-  $("machine").textContent = [m.vendor, m.product].filter(Boolean).join(" ");
+  const cpu = m.cpu
+    ? m.cpu + (m.cores ? ` (${m.cores}c/${m.threads}t)` : "")
+    : null;
+  const mem = m.memory_installed_gb ? `${m.memory_installed_gb} GB RAM` : null;
+  const vendor = (m.vendor || "").replace(
+    /[\s,]+(Inc\.?|Corp\.?|Corporation|Ltd\.?|Co\.|GmbH|S\.A\.)$/i,
+    ""
+  );
+  $("machine").textContent = [
+    [vendor, m.product].filter(Boolean).join(" "),
+    cpu,
+    mem,
+    ...(m.gpus || []),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   renderPower(snap.power || {});
   const lay = snap.layout || {};
   $("ports-note").textContent = !lay.available
@@ -137,6 +170,7 @@ function render(snap) {
         : "";
   renderPorts(snap.ports || [], lay);
   renderBuiltins(snap.builtins || []);
+  renderWireless(snap.bluetooth);
   renderChassis(snap);
   renderWizard(snap);
 }
@@ -187,14 +221,46 @@ function treeHtml(children) {
   return `<ul class="devtree">${items.join("")}</ul>`;
 }
 
+function modeLabel(p) {
+  const m = p.mode;
+  if (m === "usb_power_delivery") return "USB PD";
+  if (m === "3.0A") return "5 V · 3 A";
+  if (m === "1.5A") return "5 V · 1.5 A";
+  if (m === "default") return "USB default";
+  return m || "";
+}
+
+function slowCharger(p) {
+  // only warn when the battery actually wants power: charging, or
+  // draining while plugged in (firmware source attribution is unreliable)
+  return (
+    p &&
+    p.charging_in &&
+    batteryActive &&
+    p.watts_in &&
+    p.watts_max_in &&
+    p.watts_in < 0.5 * p.watts_max_in
+  );
+}
+
 function powerHtml(p) {
   if (!p) return "";
   const parts = [];
-  if (p.role === "sink" && (p.charging_in || p.partner_present))
-    parts.push(`<span class="in">⚡ in</span>`);
+  if (p.role === "sink" && p.charging_in) {
+    const w = p.watts_in ? ` ≈${p.watts_in} W` : "";
+    parts.push(
+      `<span class="in" title="active source as reported by firmware (can be stale after replugging)">⚡ in${w}</span>`
+    );
+  } else if (p.role === "sink" && p.partner_present) {
+    parts.push(`<span class="idle">source idle</span>`);
+  }
   if (p.role === "source" && p.partner_present)
     parts.push(`<span class="out">⚡ out</span>`);
-  if (p.mode && p.partner_present) parts.push(esc(p.mode));
+  if (p.mode && p.partner_present) parts.push(esc(modeLabel(p)));
+  if (slowCharger(p))
+    parts.push(
+      `<span class="slowwarn" title="this machine accepts up to ${esc(p.watts_max_in)} W">slow charger</span>`
+    );
   return parts.join("<br>");
 }
 
@@ -303,6 +369,59 @@ function renderPorts(ports, lay) {
   prevConnected = nowConnected;
 }
 
+const BT_ICON = {
+  "input-keyboard": "keyboard",
+  "input-mouse": "mouse",
+  "input-tablet": "touchpad",
+  "audio-headset": "headphones",
+  "audio-headphones": "headphones",
+  "audio-card": "speaker",
+  phone: "smartphone",
+  computer: "monitor",
+};
+
+function btIcon(dev) {
+  return BT_ICON[dev.icon] || "bluetooth";
+}
+
+function hlBt(address, on) {
+  document
+    .querySelectorAll(
+      `#chassis g[data-bt="${CSS.escape(address)}"], #wireless li[data-bt="${CSS.escape(address)}"]`
+    )
+    .forEach((el) => el.classList.toggle("hl", on));
+}
+
+function renderWireless(btInfo) {
+  const ul = $("wireless");
+  const h = $("wireless-h");
+  ul.replaceChildren();
+  if (!btInfo || !btInfo.available || !btInfo.devices.length) {
+    h.hidden = true;
+    return;
+  }
+  h.hidden = false;
+  const devices = [...btInfo.devices].sort(
+    (a, b) => b.connected - a.connected || (a.name || "").localeCompare(b.name || "")
+  );
+  for (const d of devices) {
+    const li = document.createElement("li");
+    li.dataset.bt = d.address;
+    if (!d.connected) li.className = "dim";
+    li.addEventListener("mouseenter", () => hlBt(d.address, true));
+    li.addEventListener("mouseleave", () => hlBt(d.address, false));
+    const state = d.connected
+      ? "connected" + (d.battery != null ? ` · ${d.battery}%` : "")
+      : d.paired
+        ? "paired"
+        : "seen";
+    li.innerHTML =
+      `<span class="k">${icon(btIcon(d))}${esc(d.name || d.address)}</span>` +
+      `<span>${esc(state)}</span>`;
+    ul.appendChild(li);
+  }
+}
+
 function renderBuiltins(builtins) {
   const ul = $("builtins");
   ul.replaceChildren();
@@ -314,6 +433,12 @@ function renderBuiltins(builtins) {
     let value = esc(b.name || "");
     if (b.status) value += " · " + esc(b.status);
     if (b.kind === "camera" && b.node) value += ` · ${esc(b.node)}`;
+    if (b.kind === "disk") {
+      value = esc(b.name);
+      if (b.size_gb) value += ` · ${b.size_gb} GB`;
+      const mts = mountsLabel(b.mounts);
+      if (mts) value += ` · ${esc(mts)}`;
+    }
     let label = BUILTIN_LABEL[b.kind] || b.kind;
     if (b.kind === "camera" && b.infrared === true) label = "IR camera";
     if (b.kind === "camera" && b.infrared === false) label = "RGB camera";
@@ -408,16 +533,35 @@ function renderChassis(snap) {
               ? "connected"
               : "empty"
             : "";
+        // power flow triangle: pointing toward the chassis = power in
+        let arrow = "";
+        const pw = port && port.power;
+        if (
+          pw &&
+          pw.partner_present &&
+          ((pw.role === "sink" && pw.charging_in) || pw.role === "source")
+        ) {
+          const isIn = pw.role === "sink";
+          const cls = isIn ? "pwr-in" : "pwr-out";
+          const towardChassis = side === "left" ? 1 : -1;
+          const dir = isIn ? towardChassis : -towardChassis;
+          const bx = side === "left" ? x + 38 : x - 8;
+          arrow =
+            `<path class="${cls}" d="M ${bx - dir * 4} ${y + 5} L ${bx + dir * 5} ${y + 11} ` +
+            `L ${bx - dir * 4} ${y + 17} Z"><title>power ${isIn ? "in" : "out"}</title></path>`;
+        }
         const label = shortDeviceLabel(port);
+        const lx = side === "left" ? x + 44 + (arrow ? 6 : 0) : x - 8 - (arrow ? 10 : 0);
         const labelSvg = label
           ? side === "left"
-            ? `<text class="slotlabel" x="${x + 44}" y="${y + 15}">${esc(label)}</text>`
-            : `<text class="slotlabel" x="${x - 8}" y="${y + 15}" text-anchor="end">${esc(label)}</text>`
+            ? `<text class="slotlabel" x="${lx}" y="${y + 15}">${esc(label)}</text>`
+            : `<text class="slotlabel" x="${lx}" y="${y + 15}" text-anchor="end">${esc(label)}</text>`
           : "";
         inner +=
           `<g class="${cls}" data-slot="${esc(s.id)}" data-portid="${esc(s.port_id || "")}">` +
           `<rect class="marker" x="${x + 4}" y="${y}" width="26" height="22" rx="4"/>` +
           iconAt(SLOT_ICON[s.type] || "plug", x + 9, y + 3, 16) +
+          arrow +
           labelSvg +
           `<title>${esc(s.label)}${status ? " — " + status : ""}</title></g>`;
       }
@@ -425,7 +569,33 @@ function renderChassis(snap) {
   } else {
     inner += `<text x="320" y="374" text-anchor="middle">no layout for this machine</text>`;
   }
+  // wireless halo: connected bluetooth devices as badges under the chassis
+  const btDevs = ((snap.bluetooth || {}).devices || []).filter((d) => d.connected);
+  if (btDevs.length) {
+    const widths = btDevs.map((d) =>
+      Math.min(120, 30 + ((d.name || d.address).length > 10 ? 10 : (d.name || d.address).length) * 6.6)
+    );
+    let bx = 320 - (widths.reduce((a, b) => a + b + 8, 0) - 8) / 2;
+    btDevs.forEach((d, i) => {
+      const w = widths[i];
+      const name = (d.name || d.address).slice(0, 10);
+      const title =
+        `${d.name || d.address} — connected` +
+        (d.battery != null ? ` · battery ${d.battery}%` : "");
+      inner +=
+        `<g class="btbadge" data-bt="${esc(d.address)}">` +
+        `<rect class="marker" x="${bx}" y="356" width="${w}" height="22" rx="11"/>` +
+        iconAt(btIcon(d), bx + 6, 359, 15) +
+        `<text class="slotlabel" x="${bx + 24}" y="371">${esc(name)}</text>` +
+        `<title>${esc(title)}</title></g>`;
+      bx += w + 8;
+    });
+  }
   svg.innerHTML = inner;
+  svg.querySelectorAll("g[data-bt]").forEach((g) => {
+    g.addEventListener("mouseenter", () => hlBt(g.dataset.bt, true));
+    g.addEventListener("mouseleave", () => hlBt(g.dataset.bt, false));
+  });
   svg.querySelectorAll("g[data-builtin]").forEach((g) => {
     g.addEventListener("mouseenter", () => hlBuiltin(g.dataset.builtin, true));
     g.addEventListener("mouseleave", () => hlBuiltin(g.dataset.builtin, false));

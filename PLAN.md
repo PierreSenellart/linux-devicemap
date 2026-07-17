@@ -74,12 +74,16 @@ What probing established, and the design consequences:
   machine (wizard binds ports; positions are still hand-set), barrel-jack
   calibration on machines that have one.
 
-### M2.5 – power polish
+### M2.5 – power polish (done)
 - Flow arrows in/out per port, net battery wattage, contract badges,
   "slow charger" warning by comparing against the machine's own sink
   PDOs (`pd0`/`pd1`).
+- Status: done — per-port `watts_in` estimate (PD source PDOs, or the
+  Type-C current mode at 5 V) and `watts_max_in` (own sink PDOs, 90 W on
+  the 9510); animated flow triangles on the chassis; friendly contract
+  labels; "slow charger" badge below 50% of max input.
 
-### M3 – Bluetooth
+### M3 – Bluetooth (done)
 - Source: BlueZ over the system D-Bus, via `busctl -j call org.bluez /
   org.freedesktop.DBus.ObjectManager GetManagedObjects` (verified to work
   unprivileged; JSON output, no new dependencies). Gives adapters
@@ -94,6 +98,13 @@ What probing established, and the design consequences:
   paired-but-disconnected devices collapsed/dimmed.
 - Degradation: without bluetoothd, show sysfs adapter presence only.
 - Out of scope: pairing/connecting management (view-only tool).
+- Status: done — `probes/bt.py` (busctl GetManagedObjects), wireless list
+  (connected first, paired dimmed, battery % when exposed), halo badges
+  under the chassis hover-linked to the list, adapter builtin enriched
+  with alias + connected count. Connection changes arrive via udev
+  `bluetooth` events; battery/property drift via the 10 s poll (a
+  PropertiesChanged D-Bus subscription would make those instant — noted
+  as optional polish).
 
 ### M4 – online bootstrap + layout registry
 - DMI → manufacturer spec/image search to pre-fill a draft layout
