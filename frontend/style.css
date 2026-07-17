@@ -148,3 +148,54 @@ h2 .note { font-weight: normal; color: var(--muted); font-size: 0.8rem; }
 svg text { fill: var(--muted); font: 11px system-ui, sans-serif; }
 svg .body { fill: var(--chassis); stroke: var(--chassis-line); }
 svg .active { fill: var(--accent); }
+svg .strip { fill: var(--chassis); stroke: var(--chassis-line); }
+.slot { color: var(--muted); cursor: default; }
+.slot .marker { fill: var(--panel); stroke: var(--line); }
+.slot.on { color: var(--accent); }
+.slot.on .marker { stroke: var(--accent); }
+.slot.unbound { cursor: pointer; }
+.slot.unbound .marker { stroke-dasharray: 3 2; }
+.slot.armed { color: var(--warn); }
+.slot.armed .marker {
+  stroke: var(--warn);
+  animation: armed-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes armed-pulse {
+  from { stroke-width: 1; }
+  to { stroke-width: 3; }
+}
+#chassis g[data-builtin].hl .body { stroke: var(--accent); stroke-width: 2; }
+#chassis g[data-builtin].hl circle { stroke: var(--accent); stroke-width: 2; }
+#chassis g[data-builtin].hl text { fill: var(--accent); }
+.builtins li.hl {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  border-radius: 4px;
+}
+.side-h {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: capitalize;
+  margin: 0.35rem 0 -0.15rem;
+}
+.port.hl {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+.slot.hl .marker {
+  stroke: var(--accent);
+  stroke-width: 3;
+  fill: color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+.slot { cursor: pointer; }
+svg .slotlabel { font-size: 10px; fill: var(--text); }
+#wizard button {
+  font: inherit;
+  font-size: 0.85rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+  cursor: pointer;
+}

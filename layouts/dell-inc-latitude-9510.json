@@ -1,0 +1,26 @@
+{
+  "dmi": {"vendor": "Dell Inc.", "product": "Latitude 9510"},
+  "status": "verified",
+  "hidden": ["DP-1", "DP-2", "HDMI-A-2"],
+  "source": "Dell Latitude 9510 setup & specifications guide; sides, order and rear-flush positions confirmed against the physical machine",
+  "sides": {
+    "left": [
+      {"id": "hdmi", "type": "hdmi", "label": "HDMI 2.0", "pos": 0.04,
+       "binding": {"drm": "HDMI-A-1"}},
+      {"id": "usbc-left-rear", "type": "usb-c", "label": "Thunderbolt 3 (rear)",
+       "pos": 0.14, "binding": {"typec": "port1"}},
+      {"id": "usbc-left-front", "type": "usb-c", "label": "Thunderbolt 3 (front)",
+       "pos": 0.24, "binding": {"typec": "port0"}},
+      {"id": "microsd", "type": "sd", "label": "microSD reader", "pos": 0.34,
+       "binding": {"mmc": "mmc0"}}
+    ],
+    "right": [
+      {"id": "usb-a", "type": "usb-a", "label": "USB 3.2 Type-A (PowerShare)",
+       "pos": 0.04, "binding": {"usb_ports": ["usb1-port6"]}},
+      {"id": "jack", "type": "audio-jack", "label": "Universal audio jack",
+       "pos": 0.14, "binding": {"jack": true}},
+      {"id": "lock", "type": "lock", "label": "Wedge lock slot", "pos": 0.30,
+       "binding": null}
+    ]
+  }
+}

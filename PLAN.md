@@ -56,7 +56,7 @@ What probing established, and the design consequences:
   events); live jack watcher on evdev; inline SVG icons from Lucide (ISC),
   see `frontend/icons.js`.
 
-### M2 – layouts + calibration wizard
+### M2 – layouts + calibration wizard (implemented; positions editable only in JSON so far)
 - Layout JSON schema: image/outline + per-port `{id, type, side, pos,
   binding}`; hand-authored layout for Latitude 9510 as the first entry.
 - Wizard: "plug something into the leftmost left-side port" → bind the
@@ -65,6 +65,14 @@ What probing established, and the design consequences:
   but user-facing).
 - Persist machine profile; render ports at their true positions
   (top-down chassis with unfolded edge strips, Dell-diagram style).
+- Status: done — layout engine (`devicemap/layout.py`, layouts keyed by
+  DMI slug, profile overrides in `profiles/`), draft 9510 layout with
+  auto-bound HDMI/USB-A/jack/microSD (an RTS525A `mmc0` slot, live via
+  udev `mmc` events), calibration API (`POST /api/calibrate/<slot>`),
+  wizard + positioned side strips in the UI. Remaining: drag-to-adjust
+  positions, verifying the draft side assignments against the physical
+  machine (wizard binds ports; positions are still hand-set), barrel-jack
+  calibration on machines that have one.
 
 ### M2.5 – power polish
 - Flow arrows in/out per port, net battery wattage, contract badges,

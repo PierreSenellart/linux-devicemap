@@ -16,6 +16,9 @@ SUBSYSTEMS = {
     "sound",
     "video4linux",
     "bluetooth",
+    "mmc",
+    "mmc_host",
+    "block",
 }
 
 _LINE = re.compile(r"^UDEV\s+\[[\d.]+\]\s+(\S+)\s+(\S+)\s+\((\S+)\)")

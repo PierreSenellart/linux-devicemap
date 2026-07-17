@@ -13,7 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import monitor, snapshot
+from . import layout, monitor, snapshot
 
 FRONTEND = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 
@@ -21,12 +21,31 @@ DEBOUNCE_S = 0.4
 BATTERY_POLL_S = 10
 
 
+def _sig(port: dict) -> tuple:
+    """Per-port signature for calibration change detection: occupancy,
+    device identity, power partner, inserted card."""
+    dev = port.get("device") or {}
+    power = port.get("power") or {}
+    card = port.get("card") or {}
+    return (
+        bool(port.get("connected")),
+        dev.get("vid"),
+        dev.get("pid"),
+        bool(power.get("partner_present")),
+        card.get("name"),
+    )
+
+
 class Hub:
-    """Holds the current snapshot and broadcasts updates to clients."""
+    """Holds the current state and broadcasts updates to clients."""
 
     def __init__(self) -> None:
-        self.snapshot: dict = {}
+        self.raw: dict = {"ports": []}  # last pure hardware snapshot
+        self.snapshot: dict = {}  # published state (snapshot + layout)
         self.clients: set[WebSocket] = set()
+        # while armed: {"slot", "baseline": {port_id: sig}, "seen": [ids]}
+        self.calibration: dict | None = None
+        self._lock = asyncio.Lock()
 
     async def broadcast(self, message: dict) -> None:
         data = json.dumps(message)
@@ -36,13 +55,50 @@ class Hub:
             except Exception:
                 self.clients.discard(ws)
 
+    def arm(self, slot_id: str) -> None:
+        self.calibration = {
+            "slot": slot_id,
+            "baseline": {p["id"]: _sig(p) for p in self.raw.get("ports", [])},
+            "seen": [],
+        }
+
+    def _calibrate_step(self, new: dict) -> None:
+        """Bind the armed slot to the most recently changed, currently
+        connected port. Any deviation from the arm-time baseline counts as
+        a change, so occupied ports can be calibrated by replugging or by
+        swapping what is plugged into them."""
+        cal = self.calibration
+        for port in new["ports"]:
+            pid = port["id"]
+            sig = _sig(port)
+            if sig != cal["baseline"].get(pid):
+                cal["baseline"][pid] = sig
+                if pid in cal["seen"]:
+                    cal["seen"].remove(pid)
+                cal["seen"].append(pid)  # most recent change last
+        for pid in reversed(cal["seen"]):
+            port = next((p for p in new["ports"] if p["id"] == pid), None)
+            if port and port.get("connected"):
+                binding = layout.binding_for_port(port)
+                if binding:
+                    layout.save_binding(new["machine"], cal["slot"], binding)
+                    self.calibration = None
+                    return
+
     async def refresh(self, reason: list[dict] | None = None) -> bool:
-        new = await asyncio.to_thread(snapshot.build)
-        old, self.snapshot = self.snapshot, new
-        changed = _strip_ts(old) != _strip_ts(new)
+        async with self._lock:
+            new = await asyncio.to_thread(snapshot.build)
+            self.raw = new
+            if self.calibration:
+                self._calibrate_step(new)
+            state = dict(new)
+            cal = {"slot": self.calibration["slot"]} if self.calibration else None
+            state["layout"] = layout.compose(new, cal)
+            old_state, self.snapshot = self.snapshot, state
+            changed = _strip_ts(old_state) != _strip_ts(state)
         if changed:
             await self.broadcast(
-                {"type": "snapshot", "data": new, "events": reason or []}
+                {"type": "snapshot", "data": state, "events": reason or []}
             )
         return changed
 
@@ -82,7 +138,7 @@ async def _battery_poll() -> None:
 
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
-    hub.snapshot = await asyncio.to_thread(snapshot.build)
+    await hub.refresh()
     tasks = [asyncio.create_task(_event_loop()), asyncio.create_task(_battery_poll())]
     loop = asyncio.get_running_loop()
     on_ev = lambda ev: asyncio.ensure_future(hub.refresh(reason=[ev]))
@@ -101,6 +157,20 @@ app = FastAPI(lifespan=_lifespan)
 @app.get("/api/state")
 async def state() -> JSONResponse:
     return JSONResponse(hub.snapshot)
+
+
+@app.post("/api/calibrate/{slot_id}")
+async def calibrate(slot_id: str) -> JSONResponse:
+    hub.arm(slot_id)
+    await hub.refresh(reason=[{"action": "calibrate", "subsystem": "layout"}])
+    return JSONResponse({"armed": slot_id})
+
+
+@app.delete("/api/calibrate")
+async def calibrate_cancel() -> JSONResponse:
+    hub.calibration = None
+    await hub.refresh(reason=[{"action": "calibrate-cancel", "subsystem": "layout"}])
+    return JSONResponse({"armed": None})
 
 
 @app.websocket("/ws")

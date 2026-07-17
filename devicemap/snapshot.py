@@ -4,23 +4,24 @@ from __future__ import annotations
 
 import time
 
-from .probes import audio, dmi, drm, inputs, media, net, power, typec, usb
+from .probes import audio, block, dmi, drm, inputs, media, mmc, net, power, typec, usb
 
 
-def _attach_net(device: dict | None, by_parent: dict) -> None:
-    """Recursively attach network-interface info to USB device nodes."""
+def _attach(device: dict | None, key: str, by_parent: dict) -> None:
+    """Recursively attach per-USB-device info (net interfaces, block
+    devices) to the device tree."""
     if not device:
         return
-    ifaces = by_parent.get(device["sysname"])
-    if not ifaces:
+    found = by_parent.get(device["sysname"])
+    if not found:
         # merged hub halves keep their original sysnames in 'halves'
-        ifaces = [
+        found = [
             i for h in device.get("halves", []) for i in by_parent.get(h, [])
         ]
-    if ifaces:
-        device["net"] = ifaces
+    if found:
+        device[key] = found
     for child in device.get("children", []):
-        _attach_net(child, by_parent)
+        _attach(child, key, by_parent)
 
 
 def build() -> dict:
@@ -35,6 +36,7 @@ def build() -> dict:
     for iface in net_info:
         if iface["usb_parent"]:
             net_by_parent.setdefault(iface["usb_parent"], []).append(iface)
+    block_by_parent = block.probe()
 
     ports = []
 
@@ -58,7 +60,8 @@ def build() -> dict:
         else:
             port["power"] = None
             port["connected"] = port["device"] is not None
-        _attach_net(port["device"], net_by_parent)
+        _attach(port["device"], "net", net_by_parent)
+        _attach(port["device"], "storage", block_by_parent)
         ports.append(port)
 
     # display connectors
@@ -71,6 +74,19 @@ def build() -> dict:
                 "device": None,
                 "power": None,
                 "status": d["status"],
+            }
+        )
+
+    # SD/MMC card slots
+    for slot in mmc.probe():
+        ports.append(
+            {
+                "id": slot["id"],
+                "kind": "sd",
+                "connected": slot["connected"],
+                "device": None,
+                "power": None,
+                "card": slot["card"],
             }
         )
 
