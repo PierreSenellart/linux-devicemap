@@ -49,6 +49,12 @@ What probing established, and the design consequences:
   occupancy, device labels, power direction arrows, PD/current mode,
   event log. No physical positions yet.
 - Feature detection surfaced in the UI (e.g. jack state unavailable).
+- Added along the way: hub halves merged (USB2+USB3 faces of one hub) with
+  full device trees in the UI; network interfaces (ethernet + wifi) joined
+  to their USB parent or listed as built-ins, wifi SSID/signal via `iw`,
+  live link changes via an rtnetlink socket (carrier changes emit no udev
+  events); live jack watcher on evdev; inline SVG icons from Lucide (ISC),
+  see `frontend/icons.js`.
 
 ### M2 – layouts + calibration wizard
 - Layout JSON schema: image/outline + per-port `{id, type, side, pos,
@@ -65,17 +71,56 @@ What probing established, and the design consequences:
   "slow charger" warning by comparing against the machine's own sink
   PDOs (`pd0`/`pd1`).
 
-### M3 – online bootstrap + layout registry
+### M3 – Bluetooth
+- Source: BlueZ over the system D-Bus, via `busctl -j call org.bluez /
+  org.freedesktop.DBus.ObjectManager GetManagedObjects` (verified to work
+  unprivileged; JSON output, no new dependencies). Gives adapters
+  (`Adapter1`: name, powered) and devices (`Device1`: name, icon, class,
+  paired, connected, address; `Battery1`: percentage).
+- Real-time: udev `bluetooth` subsystem events fire on connect/disconnect
+  (already subscribed); subscribe to `PropertiesChanged` D-Bus signals for
+  battery/connection changes that produce no udev event.
+- UI: the radio stays a built-in on the chassis; connected devices render
+  as a *wireless halo* of satellite badges around the laptop (they have no
+  physical port), icon from BlueZ `Icon`, battery percentage when exposed;
+  paired-but-disconnected devices collapsed/dimmed.
+- Degradation: without bluetoothd, show sysfs adapter presence only.
+- Out of scope: pairing/connecting management (view-only tool).
+
+### M4 – online bootstrap + layout registry
 - DMI → manufacturer spec/image search to pre-fill a draft layout
   (LLM-assisted extraction acceptable; user confirms in the wizard).
 - Shareable community registry of layouts (hwdb-like), fetch by DMI key,
   offer contribution after calibration.
 
-### M4 – polish
+### M5 – polish
 - Docks/hubs as satellite boxes with their subtree; camera/mic in-use
-  indicators; bluetooth device halo; EDID monitor names on outputs;
-  vendor plugins (e.g. Dell adapter wattage); Tauri wrapper if a desktop
-  app shell is wanted.
+  indicators; EDID monitor names on outputs; vendor plugins (e.g. Dell
+  adapter wattage); Tauri wrapper if a desktop app shell is wanted.
+
+## Audio-jack access
+
+Jack state is evdev switch state (`EVIOCGSW`) plus live evdev events on
+the jack's `/dev/input/eventN`; a live watcher is implemented and
+feature-detected at daemon startup. `/dev/input` is `root:input 0660`,
+so by default *no* ordinary user (not just the sandbox) can read it;
+options, best first:
+
+1. udev rule granting just the jack switch device to a group, e.g.
+   `/etc/udev/rules.d/99-devicemap.rules`:
+   `SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="*Headset Jack*",
+   MODE="0660", GROUP="devshare"`
+   then reload (`udevadm control --reload && udevadm trigger
+   --subsystem-match=input --action=change`). Minimal exposure: the rule
+   matches only jack switch devices, not keyboards.
+2. ALSA fallback (planned, M2): when the daemon runs in a desktop
+   session, logind's uaccess ACL already grants `/dev/snd/control*`;
+   jack state is then readable as ALSA jack kcontrols and `alsactl
+   monitor` provides events. Lets a session-run daemon work with zero
+   configuration.
+3. Adding the daemon user to the `input` group works but grants read
+   access to all input devices including keyboards (keylogging surface);
+   not recommended.
 
 ## Repository layout
 

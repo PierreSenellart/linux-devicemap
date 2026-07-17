@@ -71,4 +71,4 @@ def _pd(pd_link: str, direction: str) -> list[dict] | None:
     caps = f"{pd_link}/{direction}-capabilities"
     if not os.path.isdir(caps):
         return None
-    return _pd_capabilities(caps)
+    return _pd_capabilities(caps) or None

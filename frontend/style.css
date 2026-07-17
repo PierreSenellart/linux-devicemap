@@ -93,17 +93,45 @@ h2 .note { font-weight: normal; color: var(--muted); font-size: 0.8rem; }
 }
 .port .glyph {
   font-family: ui-monospace, monospace;
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   text-align: center;
   color: var(--muted);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.3rem 0.1rem;
 }
+.glyph svg { width: 22px; height: 22px; }
+.what .name svg,
+.devtree svg,
+.net svg,
+.builtins svg {
+  width: 15px;
+  height: 15px;
+  vertical-align: -2px;
+  margin-right: 0.35rem;
+}
+.builtins .k svg { color: var(--muted); }
+.sub.net { margin-left: 1.35rem; }
+.portid {
+  float: right;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-family: ui-monospace, monospace;
+  font-weight: normal;
+}
 .port.connected .glyph { color: var(--accent); border-color: var(--accent); }
 .port .what .name { font-weight: 600; }
 .port .what .sub { color: var(--muted); font-size: 0.85rem; }
 .port .power { text-align: right; font-size: 0.85rem; }
+.devtree {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--line);
+  font-size: 0.88rem;
+}
+.devtree li { padding: 0.12rem 0; }
+.devtree .sub { color: var(--muted); font-size: 0.8rem; }
 .port .power .in { color: var(--ok); }
 .port .power .out { color: var(--warn); }
 .events {

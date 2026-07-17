@@ -164,7 +164,7 @@ def probe() -> dict:
                 "kind": "usb-c" if typec else "usb-a",
                 "usb_ports": [p["name"] for p in members],
                 "typec": typec,
-                "device": devices[0] if devices else None,
+                "device": _merge_halves(devices),
                 "location_hint": next(
                     (p["location"] for p in members if p["location"]), None
                 ),
@@ -172,3 +172,25 @@ def probe() -> dict:
         )
     connectors.sort(key=lambda c: c["id"])
     return {"connectors": connectors, "hardwired": hardwired}
+
+
+def _merge_halves(devices: list[dict]) -> dict | None:
+    """A USB3 hub (or dock) enumerates twice on one connector: once per
+    bus generation. Present it as a single device whose children are the
+    union of both halves', keeping the SuperSpeed half as the face."""
+    if not devices:
+        return None
+    if len(devices) == 1:
+        return devices[0]
+
+    def speed(d: dict) -> float:
+        try:
+            return float(d["speed_mbps"] or 0)
+        except ValueError:
+            return 0.0
+
+    merged = dict(max(devices, key=speed))
+    merged["children"] = [c for d in devices for c in d["children"]]
+    merged["classes"] = sorted({c for d in devices for c in d["classes"]})
+    merged["halves"] = [d["sysname"] for d in devices]
+    return merged

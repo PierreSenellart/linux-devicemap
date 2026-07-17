@@ -19,7 +19,77 @@ const BUILTIN_LABEL = {
   bluetooth: "Bluetooth",
   display: "Built-in display",
   "usb-internal": "Internal USB",
+  wifi: "WiFi",
+  ethernet: "Ethernet",
+  speaker: "Speakers",
+  microphone: "Microphone",
 };
+
+const PORT_ICON = {
+  "usb-a": "usb",
+  "usb-c": "usb",
+  hdmi: "monitor",
+  dp: "monitor",
+  vga: "monitor",
+  dvi: "monitor",
+  "audio-jack": "headphones",
+};
+
+const BUILTIN_ICON = {
+  keyboard: "keyboard",
+  touchpad: "touchpad",
+  camera: "webcam",
+  bluetooth: "bluetooth",
+  display: "monitor",
+  wifi: "wifi",
+  ethernet: "ethernet-port",
+  speaker: "speaker",
+  microphone: "mic",
+};
+
+function icon(name) {
+  return (typeof ICONS !== "undefined" && ICONS[name]) || "";
+}
+
+function deviceIcon(dev) {
+  const cls = dev.classes || [];
+  const prod = (dev.product || "").toLowerCase();
+  if (cls.includes("hub")) return "network";
+  if (dev.net && dev.net.length)
+    return dev.net[0].kind === "wifi" ? "wifi" : "ethernet-port";
+  if (cls.includes("communications") || cls.includes("CDC data"))
+    return "ethernet-port";
+  if (cls.includes("mass storage"))
+    return /card/.test(prod) ? "memory-stick" : "hard-drive";
+  if (cls.includes("video")) return "webcam";
+  if (cls.includes("imaging"))
+    return /android|phone|galaxy|pixel/.test(prod) ? "smartphone" : "camera";
+  if (cls.includes("audio") || cls.includes("audio/video")) return "speaker";
+  if (cls.includes("wireless")) return "bluetooth";
+  if (cls.includes("HID"))
+    return /mouse|receiver|touchpad/.test(prod) ? "mouse" : "keyboard";
+  return "plug";
+}
+
+function netHtml(dev) {
+  if (!dev.net || !dev.net.length) return "";
+  return dev.net
+    .map((n) => {
+      let s;
+      if (n.kind === "wifi") {
+        const w = n.wifi || {};
+        s = w.connected
+          ? `${w.ssid} · ${w.signal_dbm} dBm · ${w.tx_bitrate || ""}`
+          : "not associated";
+      } else {
+        s = n.carrier
+          ? `link up${n.speed_mbps ? ` · ${n.speed_mbps} Mb/s` : ""}`
+          : "no link";
+      }
+      return `<div class="sub net">${icon(n.kind === "wifi" ? "wifi" : "ethernet-port")} ${esc(n.ifname)} · ${esc(s)}</div>`;
+    })
+    .join("");
+}
 
 let prevConnected = {}; // port id → bool, to pulse on change
 
@@ -55,9 +125,19 @@ function describeDevice(dev) {
   const bits = [];
   if (dev.classes && dev.classes.length) bits.push(dev.classes.join(", "));
   if (dev.speed_mbps) bits.push(`${dev.speed_mbps} Mb/s`);
-  if (dev.children && dev.children.length)
-    bits.push(`hub: ${dev.children.length} device(s)`);
   return { name, sub: bits.join(" · ") };
+}
+
+function treeHtml(children) {
+  if (!children || !children.length) return "";
+  const items = children.map((c) => {
+    const d = describeDevice(c);
+    return (
+      `<li>${icon(deviceIcon(c))}<span class="name">${esc(d.name)}</span>` +
+      ` <span class="sub">${esc(d.sub)}</span>${netHtml(c)}${treeHtml(c.children)}</li>`
+    );
+  });
+  return `<ul class="devtree">${items.join("")}</ul>`;
 }
 
 function powerHtml(p) {
@@ -93,8 +173,13 @@ function renderPorts(ports) {
 
     let what;
     const dev = describeDevice(port.device);
+    const portId = `<span class="portid">${esc(port.id)}</span>`;
     if (dev) {
-      what = `<div class="name">${esc(dev.name)}</div><div class="sub">${esc(dev.sub)}</div>`;
+      what =
+        `<div class="name">${icon(deviceIcon(port.device))}${esc(dev.name)}${portId}</div>` +
+        `<div class="sub">${esc(dev.sub)}</div>` +
+        netHtml(port.device) +
+        treeHtml(port.device.children);
     } else if (port.kind === "audio-jack") {
       const j = port.jack || {};
       what = j.readable
@@ -108,10 +193,12 @@ function renderPorts(ports) {
     } else {
       what = `<div class="name">empty</div>`;
     }
+    if (!dev) what = what.replace("</div>", `${portId}</div>`);
 
     el.innerHTML =
-      `<div class="glyph">${esc(KIND_LABEL[port.kind] || port.kind)}</div>` +
-      `<div class="what">${what}<div class="sub">${esc(port.id)}</div></div>` +
+      `<div class="glyph">${icon(PORT_ICON[port.kind] || "plug")}` +
+      `<div>${esc(KIND_LABEL[port.kind] || port.kind)}</div></div>` +
+      `<div class="what">${what}</div>` +
       `<div class="power">${powerHtml(port.power)}</div>`;
     box.appendChild(el);
   }
@@ -123,9 +210,23 @@ function renderBuiltins(builtins) {
   ul.replaceChildren();
   for (const b of builtins) {
     const li = document.createElement("li");
+    let value = esc(b.name || "");
+    if (b.status) value += " · " + esc(b.status);
+    if (b.kind === "camera" && b.node) value += ` · ${esc(b.node)}`;
+    let label = BUILTIN_LABEL[b.kind] || b.kind;
+    if (b.kind === "camera" && b.infrared === true) label = "IR camera";
+    if (b.kind === "camera" && b.infrared === false) label = "RGB camera";
+    if (b.kind === "wifi") {
+      const w = b.wifi || {};
+      value = w.connected
+        ? `${esc(b.name)} · ${esc(w.ssid)} · ${esc(w.signal_dbm)} dBm`
+        : `${esc(b.name)} · not associated`;
+    } else if (b.kind === "ethernet") {
+      value = `${esc(b.name)} · ${b.carrier ? "link up" : "no link"}`;
+    }
     li.innerHTML =
-      `<span class="k">${esc(BUILTIN_LABEL[b.kind] || b.kind)}</span>` +
-      `<span>${esc(b.name || "")}${b.status ? " · " + esc(b.status) : ""}</span>`;
+      `<span class="k">${icon(BUILTIN_ICON[b.kind] || "plug")}` +
+      `${esc(label)}</span><span>${value}</span>`;
     ul.appendChild(li);
   }
 }

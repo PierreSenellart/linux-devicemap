@@ -68,7 +68,14 @@ def probe() -> dict:
     for dev in _parse_proc_input():
         name, lower = dev["name"], dev["name"].lower()
         if "jack" in lower and ("headset" in lower or "headphone" in lower or "mic" in lower):
-            jacks.append({"id": name, "kind": "audio-jack", **jack_state(dev["event"])})
+            jacks.append(
+                {
+                    "id": name,
+                    "kind": "audio-jack",
+                    "event": dev["event"],
+                    **jack_state(dev["event"]),
+                }
+            )
         elif "keyboard" in lower and "translated" in lower:
             builtins.append({"kind": "keyboard", "name": name})
         elif "touchpad" in lower:

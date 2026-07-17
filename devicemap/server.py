@@ -84,9 +84,15 @@ async def _battery_poll() -> None:
 async def _lifespan(app: FastAPI):
     hub.snapshot = await asyncio.to_thread(snapshot.build)
     tasks = [asyncio.create_task(_event_loop()), asyncio.create_task(_battery_poll())]
+    loop = asyncio.get_running_loop()
+    on_ev = lambda ev: asyncio.ensure_future(hub.refresh(reason=[ev]))
+    closers = monitor.start_jack_watchers(loop, on_ev)
+    closers += monitor.start_rtnetlink_watcher(loop, on_ev)
     yield
     for t in tasks:
         t.cancel()
+    for close in closers:
+        close()
 
 
 app = FastAPI(lifespan=_lifespan)

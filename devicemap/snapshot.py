@@ -4,7 +4,23 @@ from __future__ import annotations
 
 import time
 
-from .probes import dmi, drm, inputs, media, power, typec, usb
+from .probes import audio, dmi, drm, inputs, media, net, power, typec, usb
+
+
+def _attach_net(device: dict | None, by_parent: dict) -> None:
+    """Recursively attach network-interface info to USB device nodes."""
+    if not device:
+        return
+    ifaces = by_parent.get(device["sysname"])
+    if not ifaces:
+        # merged hub halves keep their original sysnames in 'halves'
+        ifaces = [
+            i for h in device.get("halves", []) for i in by_parent.get(h, [])
+        ]
+    if ifaces:
+        device["net"] = ifaces
+    for child in device.get("children", []):
+        _attach_net(child, by_parent)
 
 
 def build() -> dict:
@@ -13,6 +29,12 @@ def build() -> dict:
     drm_info = drm.probe()
     power_info = power.probe()
     input_info = inputs.probe()
+    net_info = net.probe()
+
+    net_by_parent: dict[str, list] = {}
+    for iface in net_info:
+        if iface["usb_parent"]:
+            net_by_parent.setdefault(iface["usb_parent"], []).append(iface)
 
     ports = []
 
@@ -36,6 +58,7 @@ def build() -> dict:
         else:
             port["power"] = None
             port["connected"] = port["device"] is not None
+        _attach_net(port["device"], net_by_parent)
         ports.append(port)
 
     # display connectors
@@ -65,13 +88,23 @@ def build() -> dict:
             }
         )
 
-    builtins = list(input_info["builtins"]) + media.cameras() + media.bluetooth()
+    cams, bts = media.cameras(), media.bluetooth()
+    builtins = list(input_info["builtins"]) + cams + bts + audio.probe()
+    for iface in net_info:
+        if not iface["usb_parent"]:
+            builtins.append({"kind": iface["kind"], "name": iface["ifname"], **iface})
+    # internal USB devices already represented by a class device (camera,
+    # bluetooth) are not listed a second time
+    claimed = {b["usb_parent"] for b in cams + bts if b.get("usb_parent")}
     for hw in usb_info["hardwired"]:
+        dev = hw["device"]
+        if dev["sysname"] in claimed:
+            continue
         builtins.append(
             {
                 "kind": "usb-internal",
-                "name": (hw["device"].get("product") or "internal USB device"),
-                "classes": hw["device"]["classes"],
+                "name": dev.get("product") or f"USB {dev['vid']}:{dev['pid']}",
+                "classes": dev["classes"],
                 "port": hw["port"],
             }
         )
