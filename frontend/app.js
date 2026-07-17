@@ -39,14 +39,17 @@ const FACES = {
     right: { kind: "edge", x: 588, y: 38, h: 296, label: "right side", inward: -1 },
   },
   desktop: {
-    rear: { kind: "panel", x: 32, y: 46, w: 576, h: 230, label: "rear I/O", inward: 1 },
-    front: { kind: "panel", x: 32, y: 330, w: 576, h: 62, label: "front", inward: 1 },
-    top: { kind: "panel", x: 32, y: 412, w: 576, h: 44, label: "top", inward: 1 },
+    rear: { kind: "panel", x: 32, y: 44, w: 576, h: 210, label: "rear I/O", inward: 1 },
+    front: { kind: "panel", x: 32, y: 290, w: 576, h: 58, label: "front", inward: 1 },
+    top: { kind: "panel", x: 32, y: 376, w: 576, h: 40, label: "top", inward: 1 },
   },
 };
 
-// a tower needs the whole canvas for its panels; a laptop's fits in 380
-const VIEWBOX = { laptop: "0 0 640 380", desktop: "0 0 640 470" };
+// height of the drawn machine: a tower's stacked panels need more than a
+// laptop's. Satellites and the wireless halo hang off the bottom of it.
+const CONTENT_H = { laptop: 380, desktop: 470 };
+// the wireless halo's lane, kept clear of the body/panels above it
+const HALO_Y = { laptop: 356, desktop: 436 };
 
 const SLOT_W = 26;
 const SLOT_H = 22;
@@ -163,6 +166,20 @@ function storageHtml(dev) {
     .join("");
 }
 
+function inputsHtml(dev) {
+  if (!dev.hid_inputs || !dev.hid_inputs.length) return "";
+  return dev.hid_inputs
+    .map((n) => {
+      const ic = /mouse|trackball|pointer/i.test(n)
+        ? "mouse"
+        : /keyboard|keypad/i.test(n)
+          ? "keyboard"
+          : "plug";
+      return `<div class="sub net">${icon(ic)} ${esc(n)}</div>`;
+    })
+    .join("");
+}
+
 function netHtml(dev) {
   if (!dev.net || !dev.net.length) return "";
   return dev.net
@@ -249,6 +266,7 @@ function renderTools(snap) {
     `<button id="editbtn">${editMode ? "done editing" : "edit layout"}</button>` +
     (editMode
       ? ` <a id="exportlink" class="chip" href="/api/layout/export" download>export layout</a>` +
+        ` <button id="refreshbtn">refresh from registry</button>` +
         (lay.edited
           ? ` <button id="resetbtn">reset positions</button>`
           : "")
@@ -257,6 +275,14 @@ function renderTools(snap) {
     editMode = !editMode;
     if (lastSnap) render(lastSnap);
   };
+  const refreshBtn = $("refreshbtn");
+  if (refreshBtn)
+    refreshBtn.onclick = async () => {
+      const r = await fetch("/api/layouts/refresh", { method: "POST" });
+      const j = await r.json();
+      if (!j.updated)
+        alert("No layout found in the online registry for this machine.");
+    };
   const resetBtn = $("resetbtn");
   if (resetBtn)
     resetBtn.onclick = async () => {
@@ -312,7 +338,7 @@ function treeHtml(children) {
     const d = describeDevice(c);
     return (
       `<li>${icon(deviceIcon(c))}<span class="name">${esc(d.name)}</span>` +
-      ` <span class="sub">${esc(d.sub)}</span>${netHtml(c)}${storageHtml(c)}${treeHtml(c.children)}</li>`
+      ` <span class="sub">${esc(d.sub)}</span>${netHtml(c)}${storageHtml(c)}${inputsHtml(c)}${treeHtml(c.children)}</li>`
     );
   });
   return `<ul class="devtree">${items.join("")}</ul>`;
@@ -413,7 +439,7 @@ function renderPorts(ports, lay, form) {
   }
   const hidden = new Set(lay.hidden || []);
   for (const p of ports.filter((x) => !used.has(x.id))) {
-    if (hidden.has(p.id) && !p.connected) continue;
+    if (hidden.has(p.id) && !p.connected && !editMode) continue;
     ordered.push({ port: p, group: lay.available ? "unplaced" : "" });
   }
   let lastGroup = null;
@@ -448,6 +474,7 @@ function renderPorts(ports, lay, form) {
         `<div class="sub">${esc(dev.sub)}</div>` +
         netHtml(port.device) +
         storageHtml(port.device) +
+        inputsHtml(port.device) +
         treeHtml(port.device.children);
     } else if (port.kind === "audio-jack") {
       const j = port.jack || {};
@@ -466,17 +493,47 @@ function renderPorts(ports, lay, form) {
         ? `<div class="name">${esc(c.name || "card")}${c.size_gb ? ` · ${c.size_gb} GB` : ""}</div>`
         : `<div class="name">empty</div>`;
     } else if (port.kind === "hdmi" || port.kind === "dp") {
-      what = `<div class="name">${port.connected ? "display connected" : "empty"}</div>`;
+      what = `<div class="name">${
+        port.connected ? esc(port.monitor || "display connected") : "empty"
+      }</div>`;
     } else {
       what = `<div class="name">empty</div>`;
     }
     if (!dev) what = what.replace("</div>", `${portId}</div>`);
 
+    const isHidden = hidden.has(port.id);
+    let editExtra = "";
+    if (editMode && !loc) {
+      editExtra =
+        (isHidden ? `<span class="chip">hidden</span> ` : "") +
+        `<button class="hidebtn">${isHidden ? "unhide" : "hide"}</button> ` +
+        `<button class="placebtn">place on chassis</button>`;
+    } else if (editMode && loc && loc.slot.extra) {
+      editExtra = `<button class="placebtn unplace">unplace</button>`;
+    }
     el.innerHTML =
       `<div class="glyph">${icon(PORT_ICON[port.kind] || "plug")}` +
       `<div>${esc(KIND_LABEL[port.kind] || port.kind)}</div></div>` +
       `<div class="what">${what}</div>` +
-      `<div class="power">${powerHtml(port.power)}</div>`;
+      `<div class="power">${powerHtml(port.power)}${editExtra}</div>`;
+    const hideBtn = el.querySelector(".hidebtn");
+    if (hideBtn)
+      hideBtn.onclick = () =>
+        fetch(`/api/port/${encodeURIComponent(port.id)}/hidden`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hidden: !isHidden }),
+        });
+    const placeBtn = el.querySelector(".placebtn");
+    if (placeBtn)
+      placeBtn.onclick = () =>
+        placeBtn.classList.contains("unplace")
+          ? fetch(`/api/slot/${encodeURIComponent(loc.slot.id)}/unplace`, {
+              method: "POST",
+            })
+          : fetch(`/api/port/${encodeURIComponent(port.id)}/place`, {
+              method: "POST",
+            });
     box.appendChild(el);
   }
   prevConnected = nowConnected;
@@ -552,6 +609,9 @@ function renderBuiltins(builtins) {
       const mts = mountsLabel(b.mounts);
       if (mts) value += ` · ${esc(mts)}`;
     }
+    if (b.kind === "display" && b.monitor)
+      value = `${esc(b.name)} · ${esc(b.monitor)}`;
+    if (b.in_use === true) value += ` <span class="inuse">● in use</span>`;
     let label = BUILTIN_LABEL[b.kind] || b.kind;
     if (b.kind === "camera" && b.infrared === true) label = "IR camera";
     if (b.kind === "camera" && b.infrared === false) label = "RGB camera";
@@ -608,7 +668,9 @@ function laptopBody(snap) {
       <text x="320" y="92" text-anchor="middle">display</text>
     </g>
     <g data-builtin="camera">
-      <circle cx="320" cy="20" r="3.5" class="${cams.length ? "active" : ""}"/>
+      <circle cx="320" cy="20" r="3.5" class="${cams.length ? "active" : ""}${
+        cams.some((c) => c.in_use) ? " camuse" : ""
+      }"/>
     </g>
     <rect class="body" x="140" y="172" width="360" height="190" rx="10"/>
     <g data-builtin="keyboard">
@@ -624,7 +686,7 @@ function laptopBody(snap) {
 function desktopBody() {
   // a tower has no lid, keyboard or touchpad: draw the case with its
   // port-bearing faces unfolded as labelled 2D panels
-  let s = `<rect class="body" x="12" y="10" width="616" height="450" rx="10"/>`;
+  let s = `<rect class="body" x="12" y="10" width="616" height="420" rx="10"/>`;
   for (const f of Object.values(FACES.desktop)) {
     s +=
       `<rect class="strip" x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="8"/>` +
@@ -701,7 +763,8 @@ function slotSvg(snap, lay, form, faceName, s) {
   }
   return (
     `<g class="${cls}${editMode ? " editable" : ""}" data-slot="${esc(s.id)}" ` +
-    `data-portid="${esc(s.port_id || "")}" data-basex="${x}" data-basey="${y}">` +
+    `data-portid="${esc(s.port_id || "")}" data-basex="${x}" data-basey="${y}" ` +
+    `data-label="${esc(s.label || "")}">` +
     `<rect class="marker" x="${x}" y="${y}" width="${SLOT_W}" height="${SLOT_H}" rx="4"/>` +
     iconAt(SLOT_ICON[s.type] || "plug", x + 5, y + 3, 16) +
     arrow +
@@ -715,8 +778,8 @@ function renderChassis(snap) {
   const form = formOf(snap);
   const svg = $("chassis");
   svg.setAttribute("aria-label", `${form} schematic`);
-  svg.setAttribute("viewBox", VIEWBOX[form]);
   let inner = chassisBody(form, snap);
+  const satellites = [];
   if (lay.available) {
     if (form !== "desktop")
       for (const [name, f] of Object.entries(FACES[form]))
@@ -725,12 +788,19 @@ function renderChassis(snap) {
             `<rect class="strip" x="${f.x}" y="30" width="34" height="330" rx="8"/>` +
             `<text x="${f.x + 17}" y="24" text-anchor="middle">${esc(name)}</text>`;
     for (const [faceName, slots] of Object.entries(lay.sides || {}))
-      for (const s of slots) inner += slotSvg(snap, lay, form, faceName, s);
+      for (const s of slots) {
+        inner += slotSvg(snap, lay, form, faceName, s);
+        const face = faceGeom(form, faceName);
+        const port = (snap.ports || []).find((p) => p.id === s.port_id);
+        if (face && port && port.device && (port.device.children || []).length)
+          satellites.push({ port, face, ...slotXY(face, s.pos) });
+      }
   } else {
     inner += `<text x="320" y="374" text-anchor="middle">no layout for this machine</text>`;
   }
   // wireless halo: connected bluetooth devices as badges under the chassis
   const btDevs = ((snap.bluetooth || {}).devices || []).filter((d) => d.connected);
+  const haloY = HALO_Y[form];
   if (btDevs.length) {
     const widths = btDevs.map((d) =>
       Math.min(120, 30 + ((d.name || d.address).length > 10 ? 10 : (d.name || d.address).length) * 6.6)
@@ -744,14 +814,60 @@ function renderChassis(snap) {
         (d.battery != null ? ` · battery ${d.battery}%` : "");
       inner +=
         `<g class="btbadge" data-bt="${esc(d.address)}">` +
-        `<rect class="marker" x="${bx}" y="356" width="${w}" height="22" rx="11"/>` +
-        iconAt(btIcon(d), bx + 6, 359, 15) +
-        `<text class="slotlabel" x="${bx + 24}" y="371">${esc(name)}</text>` +
+        `<rect class="marker" x="${bx}" y="${haloY}" width="${w}" height="22" rx="11"/>` +
+        iconAt(btIcon(d), bx + 6, haloY + 3, 15) +
+        `<text class="slotlabel" x="${bx + 24}" y="${haloY + 15}">${esc(name)}</text>` +
         `<title>${esc(title)}</title></g>`;
       bx += w + 8;
     });
   }
+  // hubs/docks as satellite boxes below the chassis
+  const H = CONTENT_H[form];
+  let viewH = H;
+  if (satellites.length) {
+    viewH = H + 90;
+    const W = 160;
+    const GAP = 14;
+    let bx = 320 - (satellites.length * (W + GAP) - GAP) / 2;
+    for (const s of satellites) {
+      const d = s.port.device;
+      const title = d.product || "hub";
+      const edgeFace = s.face.kind === "edge";
+      let icons = "";
+      (d.children || [])
+        .slice(0, 7)
+        .forEach((c, i) => (icons += iconAt(deviceIcon(c), bx + 10 + i * 20, H + 32, 15)));
+      // route down the outside of the machine so the link never crosses
+      // other ports: an edge slot leaves sideways, a panel slot drops to
+      // the lane under its own face first
+      const left = edgeFace ? s.face.inward === 1 : s.x + SLOT_W / 2 < 320;
+      const edge = left ? 10 : 630;
+      const exitX = edgeFace ? (left ? s.x : s.x + SLOT_W) : s.x + SLOT_W / 2;
+      const lane = edgeFace ? s.y + 11 : s.face.y + s.face.h + 6;
+      inner +=
+        `<path class="satlink" d="M ${exitX} ${edgeFace ? s.y + 11 : s.y + SLOT_H} ` +
+        (edgeFace ? "" : `L ${exitX} ${lane} `) +
+        `L ${edge} ${lane} L ${edge} ${H + 4} L ${bx + W / 2} ${H + 4} ` +
+        `L ${bx + W / 2} ${H + 12}"/>` +
+        `<g class="satellite" data-portid="${esc(s.port.id)}">` +
+        `<rect class="marker" x="${bx}" y="${H + 12}" width="${W}" height="44" rx="8"/>` +
+        `<text class="slotlabel" x="${bx + 10}" y="${H + 26}">${esc(title.slice(0, 22))}</text>` +
+        icons +
+        `<title>${esc(title)} — ${(d.children || []).length} device(s)</title></g>`;
+      bx += W + GAP;
+    }
+  }
+  svg.setAttribute("viewBox", `0 0 640 ${viewH}`);
   svg.innerHTML = inner;
+  svg.querySelectorAll("g.satellite").forEach((g) => {
+    const pid = g.dataset.portid;
+    g.addEventListener("mouseenter", () => hlCard(pid, true));
+    g.addEventListener("mouseleave", () => hlCard(pid, false));
+    g.addEventListener("click", () => {
+      const card = document.querySelector(`.port[data-port="${CSS.escape(pid)}"]`);
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
   svg.querySelectorAll("g[data-bt]").forEach((g) => {
     g.addEventListener("mouseenter", () => hlBt(g.dataset.bt, true));
     g.addEventListener("mouseleave", () => hlBt(g.dataset.bt, false));
@@ -771,6 +887,15 @@ function renderChassis(snap) {
           baseX: parseFloat(g.dataset.basex),
           baseY: parseFloat(g.dataset.basey),
         };
+      });
+      g.addEventListener("dblclick", async () => {
+        const label = prompt("Slot label:", g.dataset.label || "");
+        if (label !== null && label.trim() !== "")
+          await fetch(`/api/slot/${encodeURIComponent(g.dataset.slot)}/label`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ label: label.trim() }),
+          });
       });
       return;
     }

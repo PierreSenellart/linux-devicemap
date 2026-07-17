@@ -8,6 +8,18 @@ import os
 import re
 
 
+def _pcm_running(path: str) -> bool:
+    """True while a stream is open on this PCM (state: RUNNING)."""
+    for status in glob.glob(f"{path}/sub*/status"):
+        try:
+            with open(status) as f:
+                if "state: RUNNING" in f.read():
+                    return True
+        except OSError:
+            pass
+    return False
+
+
 def _pcm_info(path: str) -> dict:
     info = {}
     try:
@@ -70,8 +82,12 @@ def probe() -> list[dict]:
                 continue
             if stream == "PLAYBACK" and re.search(r"speaker", pcm_id, re.I):
                 name = ", ".join(codecs.get("speaker", [])) or pcm_id
-                endpoints.append({"kind": "speaker", "name": name})
+                endpoints.append(
+                    {"kind": "speaker", "name": name, "in_use": _pcm_running(pcm)}
+                )
             elif stream == "CAPTURE":
                 name = ", ".join(codecs.get("microphone", [])) or pcm_id
-                endpoints.append({"kind": "microphone", "name": name})
+                endpoints.append(
+                    {"kind": "microphone", "name": name, "in_use": _pcm_running(pcm)}
+                )
     return endpoints

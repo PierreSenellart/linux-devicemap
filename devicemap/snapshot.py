@@ -84,6 +84,24 @@ def _power_facet(tc: dict, charging_in: bool) -> dict:
     return pw
 
 
+def _prune_inputs(device: dict | None) -> None:
+    """Drop input names that just repeat the USB device's own identity;
+    what remains are genuinely distinct peripherals (e.g. devices paired
+    behind a wireless receiver)."""
+    if not device:
+        return
+    names = device.get("hid_inputs")
+    if names:
+        own = (device.get("product") or "").strip().lower()
+        kept = [n for n in names if n.strip().lower() != own or not own]
+        if kept:
+            device["hid_inputs"] = kept
+        else:
+            device.pop("hid_inputs", None)
+    for child in device.get("children", []):
+        _prune_inputs(child)
+
+
 def build() -> dict:
     usb_info = usb.probe()
     typec_info = typec.probe()
@@ -98,6 +116,7 @@ def build() -> dict:
             net_by_parent.setdefault(iface["usb_parent"], []).append(iface)
     block_info = block.probe()
     block_by_parent = block_info["usb"]
+    inputs_by_parent = inputs.usb_inputs()
 
     ports = []
 
@@ -115,6 +134,8 @@ def build() -> dict:
             port["connected"] = port["device"] is not None
         _attach(port["device"], "net", net_by_parent)
         _attach(port["device"], "storage", block_by_parent)
+        _attach(port["device"], "hid_inputs", inputs_by_parent)
+        _prune_inputs(port["device"])
         ports.append(port)
 
     # Type-C ports the firmware links to no USB port node (no `connector`
@@ -148,6 +169,7 @@ def build() -> dict:
                 "device": None,
                 "power": None,
                 "status": d["status"],
+                "monitor": d.get("monitor"),
             }
         )
 
@@ -216,7 +238,14 @@ def build() -> dict:
             }
         )
     for d in drm_info["internal"]:
-        builtins.append({"kind": "display", "name": d["id"], "status": d["status"]})
+        builtins.append(
+            {
+                "kind": "display",
+                "name": d["id"],
+                "status": d["status"],
+                "monitor": d.get("monitor"),
+            }
+        )
 
     return {
         "ts": time.time(),
