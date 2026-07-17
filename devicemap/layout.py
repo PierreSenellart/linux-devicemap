@@ -14,6 +14,7 @@ import re
 
 BASE = os.path.dirname(os.path.dirname(__file__))
 LAYOUTS = os.path.join(BASE, "layouts")
+CARDS = os.path.join(LAYOUTS, "cards")
 PROFILES = os.path.join(BASE, "profiles")
 CACHE = os.path.join(BASE, "layouts-cache")
 REGISTRY_RAW = (
@@ -25,12 +26,15 @@ PASSIVE_TYPES = {"sim", "lock", "smartcard"}
 
 _SKELETON_KINDS = ("usb-c", "usb-a", "hdmi", "dp", "vga", "dvi", "sd", "audio-jack")
 
-# default faces per form factor: laptops carry ports on the two side
-# edges, desktops on 2D panels (the rear I/O panel holds nearly all of
-# them). The frontend owns the drawn geometry; these are just the names a
-# skeleton spreads slots across.
-_FACES = {"laptop": ("left", "right"), "desktop": ("rear", "front", "top")}
+# faces per form factor: laptops carry ports on the two side edges;
+# desktops on the rear I/O shield, the front panel, and the PCIe bracket
+# strip (populated per-unit from the card registry, not the machine
+# layout). The frontend owns the drawn geometry; these are just the names.
+_FACES = {"laptop": ("left", "right"), "desktop": ("rear", "front", "pcie")}
 _SKELETON_COLS = 4  # rear-panel grid width for a desktop skeleton
+
+# display kinds that a graphics card exposes on a PCIe bracket
+_DISPLAY_KINDS = ("dp", "hdmi", "vga", "dvi")
 
 
 def _faces(machine: dict) -> tuple[str, ...]:
@@ -171,6 +175,57 @@ def save_slot(machine: dict, slot_id: str, side: str | None, x: float, y: float)
     _save_profile(machine, profile)
 
 
+def _card_slots(snap: dict, bound_drm: set) -> list:
+    """Slots for discrete-GPU outputs, placed on the PCIe bracket face.
+    Positions and labels come from the card registry (keyed by PCI id);
+    an unknown card still gets one slot per output, evenly spread. These
+    are per-unit — never written to the shared machine layout — so each
+    machine renders its own card without a model-specific entry.
+
+    Cards are ordered by PCI address (bus order); with the usual single
+    card that is simply "the card". Each card gets a horizontal band on
+    the face, so a second card stacks below the first."""
+    discrete = [
+        p
+        for p in snap.get("ports", [])
+        if p.get("discrete")
+        and p.get("kind") in _DISPLAY_KINDS
+        and p["id"] not in bound_drm
+    ]
+    by_card: dict[str, list] = {}
+    for p in discrete:
+        by_card.setdefault(p["pci"] or "", []).append(p)
+    slots = []
+    n = len(by_card) or 1
+    for ci, (_pci, conns) in enumerate(sorted(by_card.items())):
+        conns.sort(key=lambda p: p["id"])
+        card = None
+        ids = conns[0].get("pci_ids")
+        if ids:
+            card = _load_json(f"{CARDS}/{ids.replace(':', '-')}.json")
+        outputs = (card or {}).get("outputs") or []
+        band_lo, band_h = ci / n, 1 / n
+        for oi, conn in enumerate(conns):
+            out = outputs[oi] if oi < len(outputs) else {}
+            ox = out.get("pos", {}).get("x")
+            oy = out.get("pos", {}).get("y", 0.5)
+            slots.append(
+                {
+                    "id": f"card-{conn['id']}",
+                    "type": conn["kind"],
+                    "label": out.get("label")
+                    or (f"{card['name']}" if card else f"{conn['kind'].upper()} (card)"),
+                    "pos": {
+                        "x": _spread(oi, len(conns)) if ox is None else ox,
+                        "y": round(band_lo + oy * band_h, 3),
+                    },
+                    "binding": {"drm": conn["id"]},
+                    "card": True,
+                }
+            )
+    return slots
+
+
 def skeleton(snap: dict) -> dict:
     """Derive a draft layout from the kernel's port list alone: correct
     slots and bindings, made-up geometry (evenly spread, to be dragged
@@ -179,6 +234,10 @@ def skeleton(snap: dict) -> dict:
     slots = []
     for port in snap.get("ports", []):
         if port.get("kind") not in _SKELETON_KINDS:
+            continue
+        # discrete-GPU outputs are placed on the PCIe face from the card
+        # registry, not spread with the board ports
+        if port.get("discrete") and port.get("kind") in _DISPLAY_KINDS:
             continue
         slots.append(
             {
@@ -262,6 +321,23 @@ def load(machine: dict, snap: dict | None = None) -> dict | None:
         if side_final not in _faces(machine):
             side_final = _default_face(machine)
         new_sides.setdefault(side_final, []).append(slot)
+    # PCIe-card outputs, generated per-unit from the card registry (only
+    # for a machine whose faces include a bracket strip, i.e. desktops).
+    # A card connector already bound by the machine layout is left to it.
+    if snap is not None and "pcie" in _faces(machine):
+        bound_drm = {
+            (s.get("binding") or {}).get("drm")
+            for slots in new_sides.values()
+            for s in slots
+        }
+        for slot in _card_slots(snap, bound_drm):
+            override = overrides.get(slot["id"])
+            if override:
+                slot["pos"] = _xy(override.get("pos", slot["pos"]))
+                slot["label"] = override.get("label", slot["label"])
+                new_sides.setdefault(override.get("side", "pcie"), []).append(slot)
+            else:
+                new_sides.setdefault("pcie", []).append(slot)
     # reading order within a face: rows top→bottom, then left→right
     lay["sides"] = {
         s: sorted(slots, key=lambda x: (x["pos"]["y"], x["pos"]["x"]))
@@ -278,10 +354,13 @@ def export(snap: dict) -> dict:
     lay = load(snap["machine"], snap) or {}
     sides = {}
     for side, slots in lay.get("sides", {}).items():
-        sides[side] = [
-            {k: v for k, v in slot.items() if k not in ("port_id", "extra")}
+        kept = [
+            {k: v for k, v in slot.items() if k not in ("port_id", "extra", "card")}
             for slot in slots
+            if not slot.get("card")  # card outputs are per-unit, not shared
         ]
+        if kept:
+            sides[side] = kept
     return {
         "dmi": lay.get("dmi")
         or {

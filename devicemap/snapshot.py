@@ -170,6 +170,9 @@ def build() -> dict:
                 "power": None,
                 "status": d["status"],
                 "monitor": d.get("monitor"),
+                "pci": d.get("pci"),
+                "pci_ids": d.get("pci_ids"),
+                "discrete": d.get("discrete", False),
             }
         )
 

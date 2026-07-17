@@ -29,27 +29,42 @@ const PASSIVE_SLOTS = new Set(["sim", "lock", "smartcard"]);
 
 // Drawn geometry of each chassis face, per form factor. `edge` faces are
 // the narrow strips down a laptop's sides: only pos.y is meaningful.
-// `panel` faces are the 2D port fields of a desktop (the rear I/O panel
-// is a grid: board I/O block on top, PCIe card brackets below), where
-// pos.x and pos.y both place the slot. `inward` points from the face
-// toward the machine's body, for power-flow arrows.
+// `panel` faces are 2D port fields where pos.x and pos.y both place the
+// slot. A tower's real rear I/O is a small shield block in one corner, so
+// it is drawn as an enlarged callout (`rear`) beside a true-scale locator
+// of the whole back; the front column and the PCIe bracket strip are their
+// own panels. `inward` points from the face toward the body, for power
+// arrows. See LOCATOR for the to-scale silhouette these zoom from.
 const FACES = {
   laptop: {
     left: { kind: "edge", x: 18, y: 38, h: 296, label: "left side", inward: 1 },
     right: { kind: "edge", x: 588, y: 38, h: 296, label: "right side", inward: -1 },
   },
   desktop: {
-    rear: { kind: "panel", x: 32, y: 44, w: 576, h: 210, label: "rear I/O", inward: 1 },
-    front: { kind: "panel", x: 32, y: 290, w: 576, h: 58, label: "front", inward: 1 },
-    top: { kind: "panel", x: 32, y: 376, w: 576, h: 40, label: "top", inward: 1 },
+    rear: { kind: "panel", x: 118, y: 60, w: 200, h: 288, label: "rear I/O", inward: 1 },
+    front: { kind: "panel", x: 360, y: 60, w: 130, h: 288, label: "front", inward: 1 },
+    pcie: { kind: "panel", x: 118, y: 384, w: 372, h: 58, label: "PCIe cards", inward: 1 },
   },
+};
+
+// to-scale silhouette of the whole rear, with the zones the callout faces
+// zoom from — drawn only as context, not droppable. Coordinates are the
+// back panel's real proportions (~1:2.2) read off the product photo;
+// zone rects are normalized within it (x,y,w,h) with the face they map to.
+const LOCATOR = {
+  box: { x: 24, y: 60, w: 70, h: 288 },
+  zones: [
+    { face: "rear", x: 0.08, y: 0.13, w: 0.16, h: 0.28 },
+    { face: "pcie", x: 0.08, y: 0.5, w: 0.45, h: 0.22 },
+    { label: "PSU", x: 0.08, y: 0.78, w: 0.6, h: 0.18 },
+  ],
 };
 
 // height of the drawn machine: a tower's stacked panels need more than a
 // laptop's. Satellites and the wireless halo hang off the bottom of it.
 const CONTENT_H = { laptop: 380, desktop: 470 };
 // the wireless halo's lane, kept clear of the body/panels above it
-const HALO_Y = { laptop: 356, desktop: 436 };
+const HALO_Y = { laptop: 356, desktop: 452 };
 
 const SLOT_W = 26;
 const SLOT_H = 22;
@@ -684,9 +699,26 @@ function laptopBody(snap) {
 }
 
 function desktopBody() {
-  // a tower has no lid, keyboard or touchpad: draw the case with its
-  // port-bearing faces unfolded as labelled 2D panels
-  let s = `<rect class="body" x="12" y="10" width="616" height="420" rx="10"/>`;
+  // a tower has no lid/keyboard/touchpad. Draw a to-scale locator of the
+  // whole rear (so the real proportions are honest), then the port-bearing
+  // zones as enlarged, legible callout panels beside it.
+  const L = LOCATOR.box;
+  let s = `<rect class="body" x="12" y="10" width="616" height="448" rx="10"/>`;
+  s += `<rect class="strip" x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" rx="6"/>`;
+  s += `<text x="${L.x + L.w / 2}" y="${L.y - 6}" text-anchor="middle">rear (to scale)</text>`;
+  for (const z of LOCATOR.zones) {
+    const zx = L.x + z.x * L.w,
+      zy = L.y + z.y * L.h,
+      zw = z.w * L.w,
+      zh = z.h * L.h;
+    s += `<rect class="zone" x="${zx}" y="${zy}" width="${zw}" height="${zh}" rx="2"/>`;
+    const face = z.face && FACES.desktop[z.face];
+    if (face)
+      // faint leader from the zone to its enlarged callout panel
+      s += `<path class="zonelink" d="M ${zx + zw} ${zy + zh / 2} L ${face.x} ${face.y + 12}"/>`;
+    else if (z.label)
+      s += `<text class="zonelabel" x="${zx + zw / 2}" y="${zy + zh / 2 + 3}" text-anchor="middle">${esc(z.label)}</text>`;
+  }
   for (const f of Object.values(FACES.desktop)) {
     s +=
       `<rect class="strip" x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="8"/>` +
@@ -699,7 +731,18 @@ function chassisBody(form, snap) {
   return form === "desktop" ? desktopBody() : laptopBody(snap);
 }
 
-function slotSvg(snap, lay, form, faceName, s) {
+// rough rendered width of a slot label at 10px, for collision fitting
+function labelW(text) {
+  return text.length * 5.4 + 4;
+}
+
+// the box a panel label would occupy (below the marker, centred)
+function panelLabelRect(x, text) {
+  const w = labelW(text);
+  return { x: x + SLOT_W / 2 - w / 2, w, h: 11 };
+}
+
+function slotSvg(snap, lay, form, faceName, s, showLabel = true) {
   const face = faceGeom(form, faceName);
   if (!face) return ""; // face this layout names isn't drawn for this form
   const { x, y } = slotXY(face, s.pos);
@@ -742,13 +785,12 @@ function slotSvg(snap, lay, form, faceName, s) {
       `L ${bx - dir * 4} ${y + 17} Z"><title>power ${isIn ? "in" : "out"}</title></path>`;
   }
   // only connected ports carry a label; everything else is on the tooltip
-  // and the linked ports list
+  // and the linked ports list. On dense panels a label is drawn only when
+  // renderChassis found room for it (showLabel), so nothing overlaps.
   let label = shortDeviceLabel(port);
   let labelSvg = "";
-  if (label) {
+  if (label && showLabel) {
     if (face.kind === "panel") {
-      // panel columns are far narrower than an edge's free margin, so the
-      // label is cut harder to keep neighbouring ports legible
       if (label.length > 11) label = label.slice(0, 10) + "…";
       labelSvg =
         `<text class="slotlabel" x="${x + SLOT_W / 2}" y="${y + SLOT_H + 11}" ` +
@@ -787,9 +829,39 @@ function renderChassis(snap) {
           inner +=
             `<rect class="strip" x="${f.x}" y="30" width="34" height="330" rx="8"/>` +
             `<text x="${f.x + 17}" y="24" text-anchor="middle">${esc(name)}</text>`;
+    // decide which panel labels fit: a label sits below its marker, so on
+    // a dense face it can collide with a neighbour's marker or label. Keep
+    // labels greedily (all markers first), dropping any that would overlap;
+    // the dropped ones stay reachable via hover and the ports list.
+    const keepLabel = new Set();
+    for (const [faceName, slots] of Object.entries(lay.sides || {})) {
+      const face = faceGeom(form, faceName);
+      if (!face) continue;
+      const markers = slots.map((s) => {
+        const { x, y } = slotXY(face, s.pos);
+        return { x, y, w: SLOT_W, h: SLOT_H };
+      });
+      const placed = [];
+      slots.forEach((s, i) => {
+        const port = (snap.ports || []).find((p) => p.id === s.port_id);
+        const text = shortDeviceLabel(port);
+        if (!text) return;
+        if (face.kind !== "panel") {
+          keepLabel.add(s.id); // edges label to the side, as before
+          return;
+        }
+        const m = markers[i];
+        const r = { ...panelLabelRect(m.x, text.slice(0, 11)), y: m.y + SLOT_H + 2 };
+        const hit = (b) => r.x < b.x + b.w && b.x < r.x + r.w && r.y < b.y + b.h && b.y < r.y + r.h;
+        if (markers.some((mm, j) => j !== i && hit(mm))) return;
+        if (placed.some(hit)) return;
+        placed.push(r);
+        keepLabel.add(s.id);
+      });
+    }
     for (const [faceName, slots] of Object.entries(lay.sides || {}))
       for (const s of slots) {
-        inner += slotSvg(snap, lay, form, faceName, s);
+        inner += slotSvg(snap, lay, form, faceName, s, keepLabel.has(s.id));
         const face = faceGeom(form, faceName);
         const port = (snap.ports || []).find((p) => p.id === s.port_id);
         if (face && port && port.device && (port.device.children || []).length)

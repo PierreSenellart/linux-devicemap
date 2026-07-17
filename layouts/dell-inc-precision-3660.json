@@ -1,62 +1,194 @@
 {
-  "dmi": {"vendor": "Dell Inc.", "product": "Precision 3660"},
-  "status": "draft",
-  "hidden": [],
-  "source": "Kernel-derived on a Precision 3660 tower: bindings and the GPU split are read from the machine (card1 i915 = board I/O outputs, card2 nvidia T400 = PCIe bracket). Face assignment and positions are a draft: which USB-A/USB-C holes are front-panel, and which of the six i915 connectors are physically present, still need the calibration wizard on the hardware. The Type-C ports have no `connector` symlink to a USB port node on this board, so they carry power state but no device tree.",
-  "sides": {
-    "rear": [
-      {"id": "dp-board-1", "type": "dp", "label": "DisplayPort (board)", "pos": {"x": 0.03, "y": 0.03},
-       "binding": {"drm": "DP-1"}},
-      {"id": "dp-board-2", "type": "dp", "label": "DisplayPort (board)", "pos": {"x": 0.21, "y": 0.03},
-       "binding": {"drm": "DP-2"}},
-      {"id": "dp-board-3", "type": "dp", "label": "DisplayPort (board)", "pos": {"x": 0.39, "y": 0.03},
-       "binding": {"drm": "DP-3"}},
-      {"id": "hdmi-board-1", "type": "hdmi", "label": "HDMI (board)", "pos": {"x": 0.57, "y": 0.03},
-       "binding": {"drm": "HDMI-A-1"}},
-      {"id": "hdmi-board-2", "type": "hdmi", "label": "HDMI (board)", "pos": {"x": 0.75, "y": 0.03},
-       "binding": {"drm": "HDMI-A-2"}},
-      {"id": "hdmi-board-3", "type": "hdmi", "label": "HDMI (board)", "pos": {"x": 0.93, "y": 0.03},
-       "binding": {"drm": "HDMI-A-3"}},
-
-      {"id": "usbc-1", "type": "usb-c", "label": "USB Type-C", "pos": {"x": 0.03, "y": 0.25},
-       "binding": {"typec": "port0"}},
-      {"id": "usbc-2", "type": "usb-c", "label": "USB Type-C", "pos": {"x": 0.2, "y": 0.25},
-       "binding": {"typec": "port1"}},
-      {"id": "usbc-3", "type": "usb-c", "label": "USB Type-C", "pos": {"x": 0.37, "y": 0.25},
-       "binding": {"typec": "port2"}},
-
-      {"id": "usb-rear-1", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.03, "y": 0.47},
-       "binding": {"usb_ports": ["usb1-port1", "usb2-port4"]}},
-      {"id": "usb-rear-2", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.255, "y": 0.47},
-       "binding": {"usb_ports": ["usb1-port2", "usb2-port9"]}},
-      {"id": "usb-rear-3", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.48, "y": 0.47},
-       "binding": {"usb_ports": ["usb1-port4", "usb2-port3"]}},
-      {"id": "usb-rear-4", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.705, "y": 0.47},
-       "binding": {"usb_ports": ["usb1-port5", "usb2-port8"]}},
-      {"id": "usb-rear-5", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.93, "y": 0.47},
-       "binding": {"usb_ports": ["usb1-port7", "usb2-port1"]}},
-      {"id": "usb-rear-6", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.03, "y": 0.7},
-       "binding": {"usb_ports": ["usb1-port8", "usb2-port2"]}},
-      {"id": "usb-rear-7", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.255, "y": 0.7},
-       "binding": {"usb_ports": ["usb1-port9"]}},
-      {"id": "usb-rear-8", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.48, "y": 0.7},
-       "binding": {"usb_ports": ["usb1-port10"]}},
-      {"id": "usb-rear-9", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.705, "y": 0.7},
-       "binding": {"usb_ports": ["usb1-port12", "usb2-port5"]}},
-      {"id": "usb-rear-10", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.93, "y": 0.7},
-       "binding": {"usb_ports": ["usb1-port13", "usb2-port6"]}},
-
-      {"id": "dp-t400-1", "type": "dp", "label": "Mini-DP (T400, PCIe bracket)", "pos": {"x": 0.03, "y": 0.95},
-       "binding": {"drm": "DP-4"}},
-      {"id": "dp-t400-2", "type": "dp", "label": "Mini-DP (T400, PCIe bracket)", "pos": {"x": 0.2, "y": 0.95},
-       "binding": {"drm": "DP-5"}},
-      {"id": "dp-t400-3", "type": "dp", "label": "Mini-DP (T400, PCIe bracket)", "pos": {"x": 0.37, "y": 0.95},
-       "binding": {"drm": "DP-6"}}
-    ],
-    "front": [
-      {"id": "sd", "type": "sd", "label": "SD card reader", "pos": {"x": 0.5, "y": 0.5},
-       "binding": {"mmc": "mmc0"}}
-    ],
-    "top": []
-  }
+ "dmi": {
+  "vendor": "Dell Inc.",
+  "product": "Precision 3660"
+ },
+ "status": "draft",
+ "hidden": [
+  "DP-3",
+  "HDMI-A-1",
+  "HDMI-A-2",
+  "HDMI-A-3"
+ ],
+ "source": "Dell Precision 3660 Tower Setup & Specifications guide + front/back product photos. Rear I/O block: line-out, 2x DP 1.4, 2x USB-C (10Gbps), 2x USB-A (10Gbps), 2x USB 2.0, RJ45, and an optional video-port/2.5GbE knockout. Front column: universal jack, 2x USB-A, USB-C 10Gbps, USB-C 20Gbps, SD. Positions read off the photos; the board's DP connectors (i915 exposes six, only two are fitted) and most USB holes still need the wizard to bind \u2014 the kernel gives no connector<->port link on this board. PCIe-card outputs are added from the card registry, not this entry.",
+ "sides": {
+  "rear": [
+   {
+    "id": "line-out",
+    "type": "audio-jack",
+    "label": "Line-out",
+    "pos": {
+     "x": 0.18,
+     "y": 0.06
+    },
+    "binding": {
+     "jack": true
+    }
+   },
+   {
+    "id": "dp-1",
+    "type": "dp",
+    "label": "DisplayPort 1.4",
+    "pos": {
+     "x": 0.18,
+     "y": 0.2
+    },
+    "binding": {
+     "drm": "DP-1"
+    }
+   },
+   {
+    "id": "dp-2",
+    "type": "dp",
+    "label": "DisplayPort 1.4",
+    "pos": {
+     "x": 0.18,
+     "y": 0.33
+    },
+    "binding": {
+     "drm": "DP-2"
+    }
+   },
+   {
+    "id": "usbc-rear-1",
+    "type": "usb-c",
+    "label": "USB-C 10Gbps",
+    "pos": {
+     "x": 0.18,
+     "y": 0.5
+    },
+    "binding": {
+     "typec": "port0"
+    }
+   },
+   {
+    "id": "usbc-rear-2",
+    "type": "usb-c",
+    "label": "USB-C 10Gbps",
+    "pos": {
+     "x": 0.18,
+     "y": 0.63
+    },
+    "binding": {
+     "typec": "port1"
+    }
+   },
+   {
+    "id": "usba-rear-1",
+    "type": "usb-a",
+    "label": "USB-A 10Gbps",
+    "pos": {
+     "x": 0.18,
+     "y": 0.79
+    },
+    "binding": null
+   },
+   {
+    "id": "usba-rear-2",
+    "type": "usb-a",
+    "label": "USB-A 10Gbps",
+    "pos": {
+     "x": 0.4,
+     "y": 0.79
+    },
+    "binding": null
+   },
+   {
+    "id": "usb2-rear-1",
+    "type": "usb-a",
+    "label": "USB 2.0 (Smart Power On)",
+    "pos": {
+     "x": 0.18,
+     "y": 0.93
+    },
+    "binding": {
+     "usb_ports": [
+      "usb1-port9"
+     ]
+    }
+   },
+   {
+    "id": "usb2-rear-2",
+    "type": "usb-a",
+    "label": "USB 2.0 (Smart Power On)",
+    "pos": {
+     "x": 0.4,
+     "y": 0.93
+    },
+    "binding": {
+     "usb_ports": [
+      "usb1-port10"
+     ]
+    }
+   }
+  ],
+  "front": [
+   {
+    "id": "front-jack",
+    "type": "audio-jack",
+    "label": "Universal audio jack",
+    "pos": {
+     "x": 0.5,
+     "y": 0.08
+    },
+    "binding": {
+     "jack": true
+    }
+   },
+   {
+    "id": "front-usba-1",
+    "type": "usb-a",
+    "label": "USB-A 5Gbps (PowerShare)",
+    "pos": {
+     "x": 0.5,
+     "y": 0.26
+    },
+    "binding": null
+   },
+   {
+    "id": "front-usba-2",
+    "type": "usb-a",
+    "label": "USB-A 5Gbps",
+    "pos": {
+     "x": 0.5,
+     "y": 0.42
+    },
+    "binding": null
+   },
+   {
+    "id": "front-usbc-1",
+    "type": "usb-c",
+    "label": "USB-C 10Gbps",
+    "pos": {
+     "x": 0.5,
+     "y": 0.58
+    },
+    "binding": {
+     "typec": "port2"
+    }
+   },
+   {
+    "id": "front-usbc-2",
+    "type": "usb-c",
+    "label": "USB-C 20Gbps (PowerShare)",
+    "pos": {
+     "x": 0.5,
+     "y": 0.74
+    },
+    "binding": null
+   },
+   {
+    "id": "front-sd",
+    "type": "sd",
+    "label": "SD-card reader",
+    "pos": {
+     "x": 0.5,
+     "y": 0.9
+    },
+    "binding": {
+     "mmc": "mmc0"
+    }
+   }
+  ]
+ }
 }
