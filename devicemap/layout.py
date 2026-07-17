@@ -21,6 +21,34 @@ PASSIVE_TYPES = {"sim", "lock", "smartcard"}
 
 _SKELETON_KINDS = ("usb-c", "usb-a", "hdmi", "dp", "vga", "dvi", "sd", "audio-jack")
 
+# default faces per form factor: laptops carry ports on the two side
+# edges, desktops on 2D panels (the rear I/O panel holds nearly all of
+# them). The frontend owns the drawn geometry; these are just the names a
+# skeleton spreads slots across.
+_FACES = {"laptop": ("left", "right"), "desktop": ("rear", "front", "top")}
+_SKELETON_COLS = 4  # rear-panel grid width for a desktop skeleton
+
+
+def _xy(pos) -> dict:
+    """Normalize a slot position to {x, y}. Layouts written before
+    positions were 2D carry a bare scalar: that was the coordinate along a
+    side edge, i.e. y."""
+    if isinstance(pos, dict):
+        return {"x": float(pos.get("x") or 0.0), "y": float(pos.get("y") or 0.0)}
+    return {"x": 0.0, "y": float(pos or 0.0)}
+
+
+def _clamp(v: float) -> float:
+    return round(max(0.0, min(0.95, v)), 3)
+
+
+def _spread(i: int, n: int, lo: float = 0.03, hi: float = 0.93) -> float:
+    """`i` of `n` evenly spread across a face, so a skeleton never places
+    slots off the face however many ports the machine has."""
+    if n <= 1:
+        return round((lo + hi) / 2, 3)
+    return round(lo + i * (hi - lo) / (n - 1), 3)
+
 
 def dmi_key(machine: dict) -> str:
     slug = f"{machine.get('vendor') or ''}-{machine.get('product') or ''}".lower()
@@ -60,44 +88,55 @@ def reset_slots(machine: dict) -> None:
     _save_profile(machine, profile)
 
 
-def save_slot(machine: dict, slot_id: str, side: str | None, pos: float) -> None:
+def save_slot(machine: dict, slot_id: str, side: str | None, x: float, y: float) -> None:
     profile = _load_json(_profile_path(machine)) or {}
     entry = profile.setdefault("slots", {}).setdefault(slot_id, {})
     if side:
         entry["side"] = side
-    entry["pos"] = round(max(0.0, min(0.95, pos)), 3)
+    entry["pos"] = {"x": _clamp(x), "y": _clamp(y)}
     _save_profile(machine, profile)
 
 
 def skeleton(snap: dict) -> dict:
     """Derive a draft layout from the kernel's port list alone: correct
-    slots and bindings, made-up geometry (all evenly spread, to be
-    dragged into place by the user)."""
+    slots and bindings, made-up geometry (evenly spread, to be dragged
+    into place by the user)."""
+    machine = snap.get("machine", {})
     slots = []
     for port in snap.get("ports", []):
         if port.get("kind") not in _SKELETON_KINDS:
             continue
-        binding = binding_for_port(port)
         slots.append(
             {
                 "id": port["id"],
                 "type": port["kind"],
                 "label": f"{port['kind']} ({port['id']})",
-                "pos": 0.0,
-                "binding": binding,
+                "pos": {"x": 0.0, "y": 0.0},
+                "binding": binding_for_port(port),
             }
         )
-    half = (len(slots) + 1) // 2
-    for i, slot in enumerate(slots):
-        slot["pos"] = round(0.05 + (i if i < half else i - half) * 0.12, 2)
+    if machine.get("form_factor") == "desktop":
+        # everything starts on the rear panel, laid out in a grid; the
+        # other faces stay empty until the user drags slots onto them
+        rows = max(1, -(-len(slots) // _SKELETON_COLS))
+        for i, slot in enumerate(slots):
+            slot["pos"] = {
+                "x": _spread(i % _SKELETON_COLS, _SKELETON_COLS),
+                "y": _spread(i // _SKELETON_COLS, rows),
+            }
+        sides = {face: [] for face in _FACES["desktop"]}
+        sides["rear"] = slots
+    else:
+        half = max(1, (len(slots) + 1) // 2)
+        for i, slot in enumerate(slots):
+            slot["pos"] = {"x": 0.0, "y": _spread(i % half, half)}
+        left, right = _FACES["laptop"]
+        sides = {left: slots[:half], right: slots[half:]}
     return {
-        "dmi": {
-            "vendor": snap.get("machine", {}).get("vendor"),
-            "product": snap.get("machine", {}).get("product"),
-        },
+        "dmi": {"vendor": machine.get("vendor"), "product": machine.get("product")},
         "status": "skeleton",
         "hidden": [],
-        "sides": {"left": slots[:half], "right": slots[half:]},
+        "sides": sides,
     }
 
 
@@ -120,13 +159,16 @@ def load(machine: dict, snap: dict | None = None) -> dict | None:
                 slot["binding"] = bindings[slot["id"]]
             override = overrides.get(slot["id"])
             if override:
-                slot["pos"] = override.get("pos", slot["pos"])
+                slot["pos"] = _xy(override.get("pos", slot.get("pos")))
                 side_final = override.get("side", side)
             else:
+                slot["pos"] = _xy(slot.get("pos"))
                 side_final = side
             new_sides.setdefault(side_final, []).append(slot)
+    # reading order within a face: rows top→bottom, then left→right
     lay["sides"] = {
-        s: sorted(slots, key=lambda x: x["pos"]) for s, slots in new_sides.items()
+        s: sorted(slots, key=lambda x: (x["pos"]["y"], x["pos"]["x"]))
+        for s, slots in new_sides.items()
     }
     lay["key"] = key
     lay["edited"] = bool(overrides)

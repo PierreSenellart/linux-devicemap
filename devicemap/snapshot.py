@@ -62,6 +62,28 @@ def _pdo_watts(pdos: list[dict] | None) -> float | None:
 _MODE_WATTS = {"3.0A": 15.0, "1.5A": 7.5, "default": 2.5}
 
 
+def _power_facet(tc: dict, charging_in: bool) -> dict:
+    """The power side of a Type-C connector: role, contract and the
+    wattage it is actually taking in."""
+    pw = {
+        "role": tc["power_role"],
+        "mode": tc["mode"],
+        "partner_present": tc["partner"] is not None,
+        "charging_in": charging_in,
+        "source_pdos": (tc["partner"] or {}).get("source_pdos"),
+        "sink_pdos": tc["sink_pdos"],
+        "watts_max_in": _pdo_watts(tc["sink_pdos"]),
+        "watts_in": None,
+    }
+    if pw["role"] == "sink" and pw["partner_present"]:
+        pw["watts_in"] = (
+            _pdo_watts(pw["source_pdos"])
+            if pw["mode"] == "usb_power_delivery"
+            else _MODE_WATTS.get(pw["mode"])
+        )
+    return pw
+
+
 def build() -> dict:
     usb_info = usb.probe()
     typec_info = typec.probe()
@@ -84,23 +106,7 @@ def build() -> dict:
         port = dict(conn)
         tc = typec_info.get(conn["typec"]) if conn["typec"] else None
         if tc:
-            charging_in = power_info["ucsi"].get(conn["typec"], False)
-            port["power"] = {
-                "role": tc["power_role"],
-                "mode": tc["mode"],
-                "partner_present": tc["partner"] is not None,
-                "charging_in": charging_in,
-                "source_pdos": (tc["partner"] or {}).get("source_pdos"),
-                "sink_pdos": tc["sink_pdos"],
-            }
-            pw = port["power"]
-            pw["watts_max_in"] = _pdo_watts(tc["sink_pdos"])
-            pw["watts_in"] = None
-            if pw["role"] == "sink" and pw["partner_present"]:
-                if pw["mode"] == "usb_power_delivery":
-                    pw["watts_in"] = _pdo_watts(pw["source_pdos"])
-                else:
-                    pw["watts_in"] = _MODE_WATTS.get(pw["mode"])
+            port["power"] = _power_facet(tc, power_info["ucsi"].get(conn["typec"], False))
             # a power-only partner (charger) occupies the port even though
             # no USB device enumerates
             port["connected"] = port["device"] is not None or tc["partner"] is not None
@@ -110,6 +116,27 @@ def build() -> dict:
         _attach(port["device"], "net", net_by_parent)
         _attach(port["device"], "storage", block_by_parent)
         ports.append(port)
+
+    # Type-C ports the firmware links to no USB port node (no `connector`
+    # symlink — the common case on desktops, where laptops get the link).
+    # The connector and its power contract are real, so the port must be
+    # shown; without the link no device tree can be attributed to it.
+    claimed = {c["typec"] for c in usb_info["connectors"] if c["typec"]}
+    for name, tc in sorted(typec_info.items()):
+        if name in claimed:
+            continue
+        ports.append(
+            {
+                "id": name,
+                "kind": "usb-c",
+                "usb_ports": [],
+                "typec": name,
+                "device": None,
+                "power": _power_facet(tc, power_info["ucsi"].get(name, False)),
+                "connected": tc["partner"] is not None,
+                "device_unlinked": True,
+            }
+        )
 
     # display connectors
     for d in drm_info["external"]:

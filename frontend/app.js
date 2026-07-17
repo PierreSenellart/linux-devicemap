@@ -27,6 +27,57 @@ const SLOT_ICON = {
 };
 const PASSIVE_SLOTS = new Set(["sim", "lock", "smartcard"]);
 
+// Drawn geometry of each chassis face, per form factor. `edge` faces are
+// the narrow strips down a laptop's sides: only pos.y is meaningful.
+// `panel` faces are the 2D port fields of a desktop (the rear I/O panel
+// is a grid: board I/O block on top, PCIe card brackets below), where
+// pos.x and pos.y both place the slot. `inward` points from the face
+// toward the machine's body, for power-flow arrows.
+const FACES = {
+  laptop: {
+    left: { kind: "edge", x: 18, y: 38, h: 296, label: "left side", inward: 1 },
+    right: { kind: "edge", x: 588, y: 38, h: 296, label: "right side", inward: -1 },
+  },
+  desktop: {
+    rear: { kind: "panel", x: 32, y: 46, w: 576, h: 230, label: "rear I/O", inward: 1 },
+    front: { kind: "panel", x: 32, y: 330, w: 576, h: 62, label: "front", inward: 1 },
+    top: { kind: "panel", x: 32, y: 412, w: 576, h: 44, label: "top", inward: 1 },
+  },
+};
+
+// a tower needs the whole canvas for its panels; a laptop's fits in 380
+const VIEWBOX = { laptop: "0 0 640 380", desktop: "0 0 640 470" };
+
+const SLOT_W = 26;
+const SLOT_H = 22;
+const LABEL_H = 13; // room kept under a panel marker for its device label
+
+function formOf(snap) {
+  const f = (snap.machine || {}).form_factor;
+  return FACES[f] ? f : "laptop"; // unknown/other: the laptop schematic
+}
+
+function faceGeom(form, name) {
+  return FACES[form][name];
+}
+
+// how far a marker's top-left may travel down a face. Panels keep a
+// label's worth of room at the bottom so the text stays inside the face.
+function faceSpanY(face) {
+  return face.kind === "edge" ? face.h : face.h - SLOT_H - LABEL_H;
+}
+
+// top-left corner of a slot marker placed at `pos` on `face`
+function slotXY(face, pos) {
+  const p = pos || { x: 0, y: 0 };
+  return face.kind === "edge"
+    ? { x: face.x + 4, y: face.y + p.y * face.h }
+    : {
+        x: face.x + p.x * (face.w - SLOT_W),
+        y: face.y + p.y * faceSpanY(face),
+      };
+}
+
 const BUILTIN_LABEL = {
   keyboard: "Keyboard",
   touchpad: "Touchpad",
@@ -164,7 +215,7 @@ function render(snap) {
   ]
     .filter(Boolean)
     .join(" · ");
-  renderPower(snap.power || {});
+  renderPower(snap.power || {}, formOf(snap));
   const lay = snap.layout || {};
   $("ports-note").textContent = !lay.available
     ? "no layout for this machine — positions unknown"
@@ -179,7 +230,7 @@ function render(snap) {
     $("ports-note").textContent += (
       $("ports-note").textContent ? " · " : ""
     ) + "locally edited positions";
-  renderPorts(snap.ports || [], lay);
+  renderPorts(snap.ports || [], lay, formOf(snap));
   renderBuiltins(snap.builtins || []);
   renderWireless(snap.bluetooth);
   renderChassis(snap);
@@ -224,11 +275,16 @@ function slotOfPort(lay, portId) {
   return null;
 }
 
-function renderPower(power) {
+function renderPower(power, form) {
   const bat = (power.batteries || [])[0];
   const chip = $("powerchip");
   if (!bat) {
-    chip.textContent = power.ac_online ? "AC power" : "power: ?";
+    // a machine with no battery on mains is the desktop norm, and many
+    // towers expose no "Mains" power supply at all — leaving ac_online
+    // unknown rather than false. Only an explicit false is a real doubt.
+    const ac = power.ac_online || (form === "desktop" && power.ac_online == null);
+    chip.textContent = ac ? "AC power" : "power: ?";
+    chip.className = "chip" + (ac ? " ok" : "");
     return;
   }
   const flow =
@@ -311,6 +367,15 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// a partner drawing power from us, or one we cannot see into, is not a
+// charger: only power actually coming in makes it one
+function isCharger(port) {
+  const p = port.power;
+  if (!p || !p.partner_present) return false;
+  if (p.role === "sink" && p.charging_in) return true;
+  return !port.device_unlinked;
+}
+
 function shortDeviceLabel(port) {
   if (!port || !port.connected) return "";
   const dev = port.device;
@@ -319,25 +384,29 @@ function shortDeviceLabel(port) {
     const extra = dev.children && dev.children.length ? ` +${dev.children.length}` : "";
     return (n.length > 14 ? n.slice(0, 13) + "…" : n) + extra;
   }
-  if (port.power && port.power.partner_present) return "charger";
+  if (port.power && port.power.partner_present)
+    return isCharger(port) ? "charger" : "attached";
   if (port.card) return port.card.name || "card";
   if (port.kind === "hdmi" || port.kind === "dp") return "display";
   if (port.kind === "audio-jack") return "plugged";
   return "";
 }
 
-function renderPorts(ports, lay) {
+function renderPorts(ports, lay, form) {
   const box = $("ports");
   box.replaceChildren();
   const nowConnected = {};
-  // physical order first: layout sides, slots sorted rear→front
+  // physical order first: layout faces, slots in reading order
   const ordered = [];
   const used = new Set();
   for (const [side, slots] of Object.entries(lay.sides || {})) {
-    for (const s of [...slots].sort((a, b) => a.pos - b.pos)) {
+    const face = faceGeom(form, side);
+    for (const s of [...slots].sort(
+      (a, b) => a.pos.y - b.pos.y || a.pos.x - b.pos.x
+    )) {
       const p = s.port_id && ports.find((x) => x.id === s.port_id);
       if (p) {
-        ordered.push({ port: p, group: `${side} side` });
+        ordered.push({ port: p, group: face ? face.label : side });
         used.add(p.id);
       }
     }
@@ -387,7 +456,10 @@ function renderPorts(ports, lay) {
           `<div class="sub">headphone: ${j.headphone ? "yes" : "no"} · mic: ${j.microphone ? "yes" : "no"}</div>`
         : `<div class="name">state unavailable</div><div class="sub">needs /dev/input access</div>`;
     } else if (port.connected && port.power && port.power.partner_present && !port.device) {
-      what = `<div class="name">power adapter</div><div class="sub">power-only partner</div>`;
+      what = isCharger(port)
+        ? `<div class="name">power adapter</div><div class="sub">power-only partner</div>`
+        : `<div class="name">partner attached</div>` +
+          `<div class="sub">firmware links no USB port to this connector, so the device is not visible</div>`;
     } else if (port.kind === "sd") {
       const c = port.card;
       what = c
@@ -526,12 +598,10 @@ function iconAt(name, x, y, size) {
     .replace('height="24"', `height="${size}"`);
 }
 
-function renderChassis(snap) {
+function laptopBody(snap) {
   const cams = (snap.builtins || []).filter((b) => b.kind === "camera");
-  const lay = snap.layout || {};
-  const svg = $("chassis");
   // top-down schematic: screen half (with camera dot) + base half
-  let inner = `
+  return `
     <rect class="body" x="140" y="12" width="360" height="150" rx="10"/>
     <g data-builtin="display">
       <rect class="body" x="155" y="27" width="330" height="120" rx="4"/>
@@ -549,65 +619,113 @@ function renderChassis(snap) {
       <rect class="body" x="260" y="288" width="120" height="58" rx="6"/>
       <text x="320" y="322" text-anchor="middle">touchpad</text>
     </g>`;
-  if (lay.available) {
-    const STRIP = { left: 18, right: 588 };
-    for (const [side, slots] of Object.entries(lay.sides || {})) {
-      const x = STRIP[side];
-      if (x === undefined) continue;
-      inner += `<rect class="strip" x="${x}" y="30" width="34" height="330" rx="8"/>`;
-      inner += `<text x="${x + 17}" y="24" text-anchor="middle">${esc(side)}</text>`;
-      for (const s of slots) {
-        const y = 38 + s.pos * 296;
-        const port = (snap.ports || []).find((p) => p.id === s.port_id);
-        const unbound = !s.binding && !PASSIVE_SLOTS.has(s.type);
-        const armed =
-          lay.calibration && lay.calibration.slot === s.id ? " armed" : "";
-        const cls =
-          "slot" +
-          (port && port.connected ? " on" : "") +
-          (unbound ? " unbound" : "") +
-          armed;
-        const status = unbound
-          ? "not calibrated — click to bind"
-          : port
-            ? port.connected
-              ? "connected"
-              : "empty"
-            : "";
-        // power flow triangle: pointing toward the chassis = power in
-        let arrow = "";
-        const pw = port && port.power;
-        if (
-          pw &&
-          pw.partner_present &&
-          ((pw.role === "sink" && pw.charging_in) || pw.role === "source")
-        ) {
-          const isIn = pw.role === "sink";
-          const cls = isIn ? "pwr-in" : "pwr-out";
-          const towardChassis = side === "left" ? 1 : -1;
-          const dir = isIn ? towardChassis : -towardChassis;
-          const bx = side === "left" ? x + 38 : x - 8;
-          arrow =
-            `<path class="${cls}" d="M ${bx - dir * 4} ${y + 5} L ${bx + dir * 5} ${y + 11} ` +
-            `L ${bx - dir * 4} ${y + 17} Z"><title>power ${isIn ? "in" : "out"}</title></path>`;
-        }
-        const label = shortDeviceLabel(port);
-        const lx = side === "left" ? x + 44 + (arrow ? 6 : 0) : x - 8 - (arrow ? 10 : 0);
-        const labelSvg = label
-          ? side === "left"
-            ? `<text class="slotlabel" x="${lx}" y="${y + 15}">${esc(label)}</text>`
-            : `<text class="slotlabel" x="${lx}" y="${y + 15}" text-anchor="end">${esc(label)}</text>`
-          : "";
-        inner +=
-          `<g class="${cls}${editMode ? " editable" : ""}" data-slot="${esc(s.id)}" ` +
-          `data-portid="${esc(s.port_id || "")}" data-basex="${x}" data-basey="${y}">` +
-          `<rect class="marker" x="${x + 4}" y="${y}" width="26" height="22" rx="4"/>` +
-          iconAt(SLOT_ICON[s.type] || "plug", x + 9, y + 3, 16) +
-          arrow +
-          labelSvg +
-          `<title>${esc(s.label)}${status ? " — " + status : ""}</title></g>`;
-      }
+}
+
+function desktopBody() {
+  // a tower has no lid, keyboard or touchpad: draw the case with its
+  // port-bearing faces unfolded as labelled 2D panels
+  let s = `<rect class="body" x="12" y="10" width="616" height="450" rx="10"/>`;
+  for (const f of Object.values(FACES.desktop)) {
+    s +=
+      `<rect class="strip" x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="8"/>` +
+      `<text x="${f.x + f.w / 2}" y="${f.y - 6}" text-anchor="middle">${esc(f.label)}</text>`;
+  }
+  return s;
+}
+
+function chassisBody(form, snap) {
+  return form === "desktop" ? desktopBody() : laptopBody(snap);
+}
+
+function slotSvg(snap, lay, form, faceName, s) {
+  const face = faceGeom(form, faceName);
+  if (!face) return ""; // face this layout names isn't drawn for this form
+  const { x, y } = slotXY(face, s.pos);
+  const port = (snap.ports || []).find((p) => p.id === s.port_id);
+  const unbound = !s.binding && !PASSIVE_SLOTS.has(s.type);
+  const armed = lay.calibration && lay.calibration.slot === s.id ? " armed" : "";
+  const cls =
+    "slot" +
+    (port && port.connected ? " on" : "") +
+    (unbound ? " unbound" : "") +
+    armed;
+  const status = unbound
+    ? "not calibrated — click to bind"
+    : port
+      ? port.connected
+        ? "connected"
+        : "empty"
+      : "";
+  // power flow triangle: pointing toward the machine = power in
+  let arrow = "";
+  const pw = port && port.power;
+  if (
+    pw &&
+    pw.partner_present &&
+    ((pw.role === "sink" && pw.charging_in) || pw.role === "source")
+  ) {
+    const isIn = pw.role === "sink";
+    const acls = isIn ? "pwr-in" : "pwr-out";
+    // on an edge the arrow sits beside the marker and points at the body;
+    // on a panel it sits to the right and points back at the port
+    const dir = face.kind === "edge" ? (isIn ? face.inward : -face.inward) : isIn ? -1 : 1;
+    const bx =
+      face.kind === "edge"
+        ? face.inward === 1
+          ? x + 34
+          : x - 12
+        : x + SLOT_W + 8;
+    arrow =
+      `<path class="${acls}" d="M ${bx - dir * 4} ${y + 5} L ${bx + dir * 5} ${y + 11} ` +
+      `L ${bx - dir * 4} ${y + 17} Z"><title>power ${isIn ? "in" : "out"}</title></path>`;
+  }
+  // only connected ports carry a label; everything else is on the tooltip
+  // and the linked ports list
+  let label = shortDeviceLabel(port);
+  let labelSvg = "";
+  if (label) {
+    if (face.kind === "panel") {
+      // panel columns are far narrower than an edge's free margin, so the
+      // label is cut harder to keep neighbouring ports legible
+      if (label.length > 11) label = label.slice(0, 10) + "…";
+      labelSvg =
+        `<text class="slotlabel" x="${x + SLOT_W / 2}" y="${y + SLOT_H + 11}" ` +
+        `text-anchor="middle">${esc(label)}</text>`;
+    } else if (face.inward === 1) {
+      labelSvg = `<text class="slotlabel" x="${x + 40 + (arrow ? 6 : 0)}" y="${y + 15}">${esc(label)}</text>`;
+    } else {
+      labelSvg =
+        `<text class="slotlabel" x="${x - 12 - (arrow ? 10 : 0)}" y="${y + 15}" ` +
+        `text-anchor="end">${esc(label)}</text>`;
     }
+  }
+  return (
+    `<g class="${cls}${editMode ? " editable" : ""}" data-slot="${esc(s.id)}" ` +
+    `data-portid="${esc(s.port_id || "")}" data-basex="${x}" data-basey="${y}">` +
+    `<rect class="marker" x="${x}" y="${y}" width="${SLOT_W}" height="${SLOT_H}" rx="4"/>` +
+    iconAt(SLOT_ICON[s.type] || "plug", x + 5, y + 3, 16) +
+    arrow +
+    labelSvg +
+    `<title>${esc(s.label)}${status ? " — " + status : ""}</title></g>`
+  );
+}
+
+function renderChassis(snap) {
+  const lay = snap.layout || {};
+  const form = formOf(snap);
+  const svg = $("chassis");
+  svg.setAttribute("aria-label", `${form} schematic`);
+  svg.setAttribute("viewBox", VIEWBOX[form]);
+  let inner = chassisBody(form, snap);
+  if (lay.available) {
+    if (form !== "desktop")
+      for (const [name, f] of Object.entries(FACES[form]))
+        if (f.kind === "edge")
+          inner +=
+            `<rect class="strip" x="${f.x}" y="30" width="34" height="330" rx="8"/>` +
+            `<text x="${f.x + 17}" y="24" text-anchor="middle">${esc(name)}</text>`;
+    for (const [faceName, slots] of Object.entries(lay.sides || {}))
+      for (const s of slots) inner += slotSvg(snap, lay, form, faceName, s);
   } else {
     inner += `<text x="320" y="374" text-anchor="middle">no layout for this machine</text>`;
   }
@@ -649,8 +767,9 @@ function renderChassis(snap) {
         drag = {
           slotId: g.dataset.slot,
           g,
+          form: formOf(snap),
+          baseX: parseFloat(g.dataset.basex),
           baseY: parseFloat(g.dataset.basey),
-          baseStripX: parseFloat(g.dataset.basex),
         };
       });
       return;
@@ -720,22 +839,57 @@ function logEvents(events) {
   while (ul.children.length > 100) ul.removeChild(ul.lastChild);
 }
 
-const STRIP_X = { left: 18, right: 588 };
-
 function svgPos(evt) {
   const svg = $("chassis");
   const pt = new DOMPoint(evt.clientX, evt.clientY);
   return pt.matrixTransform(svg.getScreenCTM().inverse());
 }
 
+// the droppable rectangle of a face: an edge's is its whole strip
+function faceRect(face) {
+  return face.kind === "edge"
+    ? { x: face.x, y: 30, w: 34, h: 330 }
+    : { x: face.x, y: face.y, w: face.w, h: face.h };
+}
+
+// face under the cursor, else the nearest one — so a slot dropped just
+// outside a face still lands somewhere sensible instead of snapping back
+function faceAt(form, p) {
+  let best = null;
+  for (const [name, face] of Object.entries(FACES[form])) {
+    const r = faceRect(face);
+    if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)
+      return { name, face };
+    const dx = Math.max(r.x - p.x, 0, p.x - (r.x + r.w));
+    const dy = Math.max(r.y - p.y, 0, p.y - (r.y + r.h));
+    const d = dx * dx + dy * dy;
+    if (!best || d < best.d) best = { name, face, d };
+  }
+  return best;
+}
+
+const clamp01 = (v) => Math.max(0, Math.min(0.95, v));
+
+// inverse of slotXY: cursor → normalized position, marker centred on it
+function posInFace(face, p) {
+  const y = clamp01((p.y - SLOT_H / 2 - face.y) / faceSpanY(face));
+  const x =
+    face.kind === "edge" ? 0 : clamp01((p.x - SLOT_W / 2 - face.x) / (face.w - SLOT_W));
+  return { x, y };
+}
+
 document.addEventListener("pointermove", (evt) => {
   if (!drag) return;
   const p = svgPos(evt);
-  drag.side = p.x < 320 ? "left" : "right";
-  drag.pos = Math.max(0, Math.min(0.95, (p.y - 49) / 296));
-  const dx = STRIP_X[drag.side] - drag.baseStripX;
-  const dy = 38 + drag.pos * 296 - drag.baseY;
-  drag.g.setAttribute("transform", `translate(${dx},${dy})`);
+  const hit = faceAt(drag.form, p);
+  if (!hit) return;
+  drag.side = hit.name;
+  drag.pos = posInFace(hit.face, p);
+  const t = slotXY(hit.face, drag.pos);
+  drag.g.setAttribute(
+    "transform",
+    `translate(${t.x - drag.baseX},${t.y - drag.baseY})`
+  );
 });
 
 document.addEventListener("pointerup", async () => {
@@ -746,7 +900,7 @@ document.addEventListener("pointerup", async () => {
     await fetch(`/api/slot/${encodeURIComponent(d.slotId)}/position`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ side: d.side, pos: d.pos }),
+      body: JSON.stringify({ side: d.side, x: d.pos.x, y: d.pos.y }),
     });
   }
   if (pendingSnap) {

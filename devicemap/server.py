@@ -176,7 +176,11 @@ async def calibrate_cancel() -> JSONResponse:
 @app.post("/api/slot/{slot_id}/position")
 async def slot_position(slot_id: str, payload: dict = Body(...)) -> JSONResponse:
     layout.save_slot(
-        hub.raw["machine"], slot_id, payload.get("side"), float(payload["pos"])
+        hub.raw["machine"],
+        slot_id,
+        payload.get("side"),
+        float(payload.get("x") or 0.0),
+        float(payload["y"]),
     )
     await hub.refresh(reason=[{"action": "move-slot", "subsystem": "layout"}])
     return JSONResponse({"ok": True})

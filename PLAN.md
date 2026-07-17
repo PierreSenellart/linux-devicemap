@@ -4,7 +4,8 @@
 `linux-devicemap`.)
 
 Real-time graphical view of a computer's ports and devices, drawn at their
-physical locations on the chassis.
+physical locations on the chassis — laptops (side edges) and desktops (rear
+I/O, front and top panels).
 
 ## Architecture (decided)
 
@@ -62,6 +63,8 @@ What probing established, and the design consequences:
 ### M2 – layouts + calibration wizard (implemented; positions editable only in JSON so far)
 - Layout JSON schema: image/outline + per-port `{id, type, side, pos,
   binding}`; hand-authored layout for Latitude 9510 as the first entry.
+  (`pos` was a scalar along the side edge; it became `{x, y}` in M4.5, with
+  the scalar still accepted.)
 - Wizard: "plug something into the leftmost left-side port" → bind the
   kernel port that fires; AC plug/unplug binds barrel jacks on machines
   that have them; promote/demote built-ins (SD readers are `hardwired`
@@ -135,6 +138,36 @@ What probing established, and the design consequences:
   the `hidden` list and slot labels (today JSON-side); a "reset to
   registry layout" action (drop the profile's `slots` overrides) and a
   visible hint when local position edits shadow the shipped layout.
+
+### M4.5 – desktops (done)
+Everything above assumed a laptop: a lid/keyboard/touchpad schematic, ports
+on two side *edges*, and a single scalar position along each edge. A tower
+has none of that — its ports sit on a **rear I/O panel** (a 2D field: board
+I/O block above, PCIe card brackets below), a **front** panel and sometimes
+a **top**. So:
+
+- **Positions are 2D**: `pos` is `{x, y}` normalized within a face. A bare
+  scalar (every layout written before this) is read as `{x: 0, y: scalar}`,
+  so the 9510 entry and existing profiles keep working untouched; writers
+  emit 2D.
+- **Faces have a kind**: `edge` (laptop left/right — narrow, only `y`
+  matters, drawn and dragged exactly as before) and `panel` (desktop
+  rear/front/top — 2D, both axes). `layouts/` stays pure slot lists; the
+  drawn geometry lives in the frontend's `FACES` table, keyed by form
+  factor.
+- **`form_factor`** now distinguishes `desktop` (SMBIOS chassis 3–7, 15–17,
+  23, 24) from `laptop`/`other`, and selects the schematic, the skeleton's
+  faces, and the power chip's no-battery wording.
+
+Ground truth from the reference desktop (Dell Precision 3660), and what it
+forced:
+
+| Fact | Consequence |
+|---|---|
+| No `Mains` power supply exists at all — `ac_online` stays `None`, not `False` | a battery-less desktop reads as "AC power"; only an explicit `False` is real doubt |
+| No USB port node carries a `connector` symlink, unlike the 9510 | the 3 Type-C ports were invisible: `snapshot` now emits typec ports no USB connector claimed (`device_unlinked`), power state without a device tree |
+| A Type-C partner with no linkable device is *not* necessarily a charger (port0 is `source`, feeding 3 A out) | "power adapter" is claimed only when power actually flows in; otherwise "partner attached" |
+| 6 i915 + 3 nvidia DRM connectors, only some physical | the GPU split is kernel-readable (card1 i915 = board, card2 = PCIe bracket); which connectors are phantom is not — left to calibration |
 
 ### M5 – polish
 - Docks/hubs as satellite boxes with their subtree; camera/mic in-use

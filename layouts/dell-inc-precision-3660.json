@@ -1,0 +1,62 @@
+{
+  "dmi": {"vendor": "Dell Inc.", "product": "Precision 3660"},
+  "status": "draft",
+  "hidden": [],
+  "source": "Kernel-derived on a Precision 3660 tower: bindings and the GPU split are read from the machine (card1 i915 = board I/O outputs, card2 nvidia T400 = PCIe bracket). Face assignment and positions are a draft: which USB-A/USB-C holes are front-panel, and which of the six i915 connectors are physically present, still need the calibration wizard on the hardware. The Type-C ports have no `connector` symlink to a USB port node on this board, so they carry power state but no device tree.",
+  "sides": {
+    "rear": [
+      {"id": "dp-board-1", "type": "dp", "label": "DisplayPort (board)", "pos": {"x": 0.03, "y": 0.03},
+       "binding": {"drm": "DP-1"}},
+      {"id": "dp-board-2", "type": "dp", "label": "DisplayPort (board)", "pos": {"x": 0.21, "y": 0.03},
+       "binding": {"drm": "DP-2"}},
+      {"id": "dp-board-3", "type": "dp", "label": "DisplayPort (board)", "pos": {"x": 0.39, "y": 0.03},
+       "binding": {"drm": "DP-3"}},
+      {"id": "hdmi-board-1", "type": "hdmi", "label": "HDMI (board)", "pos": {"x": 0.57, "y": 0.03},
+       "binding": {"drm": "HDMI-A-1"}},
+      {"id": "hdmi-board-2", "type": "hdmi", "label": "HDMI (board)", "pos": {"x": 0.75, "y": 0.03},
+       "binding": {"drm": "HDMI-A-2"}},
+      {"id": "hdmi-board-3", "type": "hdmi", "label": "HDMI (board)", "pos": {"x": 0.93, "y": 0.03},
+       "binding": {"drm": "HDMI-A-3"}},
+
+      {"id": "usbc-1", "type": "usb-c", "label": "USB Type-C", "pos": {"x": 0.03, "y": 0.25},
+       "binding": {"typec": "port0"}},
+      {"id": "usbc-2", "type": "usb-c", "label": "USB Type-C", "pos": {"x": 0.2, "y": 0.25},
+       "binding": {"typec": "port1"}},
+      {"id": "usbc-3", "type": "usb-c", "label": "USB Type-C", "pos": {"x": 0.37, "y": 0.25},
+       "binding": {"typec": "port2"}},
+
+      {"id": "usb-rear-1", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.03, "y": 0.47},
+       "binding": {"usb_ports": ["usb1-port1", "usb2-port4"]}},
+      {"id": "usb-rear-2", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.255, "y": 0.47},
+       "binding": {"usb_ports": ["usb1-port2", "usb2-port9"]}},
+      {"id": "usb-rear-3", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.48, "y": 0.47},
+       "binding": {"usb_ports": ["usb1-port4", "usb2-port3"]}},
+      {"id": "usb-rear-4", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.705, "y": 0.47},
+       "binding": {"usb_ports": ["usb1-port5", "usb2-port8"]}},
+      {"id": "usb-rear-5", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.93, "y": 0.47},
+       "binding": {"usb_ports": ["usb1-port7", "usb2-port1"]}},
+      {"id": "usb-rear-6", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.03, "y": 0.7},
+       "binding": {"usb_ports": ["usb1-port8", "usb2-port2"]}},
+      {"id": "usb-rear-7", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.255, "y": 0.7},
+       "binding": {"usb_ports": ["usb1-port9"]}},
+      {"id": "usb-rear-8", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.48, "y": 0.7},
+       "binding": {"usb_ports": ["usb1-port10"]}},
+      {"id": "usb-rear-9", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.705, "y": 0.7},
+       "binding": {"usb_ports": ["usb1-port12", "usb2-port5"]}},
+      {"id": "usb-rear-10", "type": "usb-a", "label": "USB Type-A (rear)", "pos": {"x": 0.93, "y": 0.7},
+       "binding": {"usb_ports": ["usb1-port13", "usb2-port6"]}},
+
+      {"id": "dp-t400-1", "type": "dp", "label": "Mini-DP (T400, PCIe bracket)", "pos": {"x": 0.03, "y": 0.95},
+       "binding": {"drm": "DP-4"}},
+      {"id": "dp-t400-2", "type": "dp", "label": "Mini-DP (T400, PCIe bracket)", "pos": {"x": 0.2, "y": 0.95},
+       "binding": {"drm": "DP-5"}},
+      {"id": "dp-t400-3", "type": "dp", "label": "Mini-DP (T400, PCIe bracket)", "pos": {"x": 0.37, "y": 0.95},
+       "binding": {"drm": "DP-6"}}
+    ],
+    "front": [
+      {"id": "sd", "type": "sd", "label": "SD card reader", "pos": {"x": 0.5, "y": 0.5},
+       "binding": {"mmc": "mmc0"}}
+    ],
+    "top": []
+  }
+}

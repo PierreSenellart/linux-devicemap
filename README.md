@@ -6,6 +6,11 @@ jack, SD slots, built-in components (camera, keyboard, speakers…),
 network interfaces, drives and Bluetooth peers — drawn at their physical
 locations on the chassis, updated live on hotplug.
 
+Laptops are drawn as a top-down schematic with their two side edges
+unfolded; desktops as a tower with its rear I/O, front and top panels laid
+out as 2D fields, since a tower's ports sit in a grid rather than along a
+line.
+
 Per-model chassis layouts live in `layouts/` (this directory is the
 community registry, hwdb-style); binding a layout to your machine takes a
 two-minute in-app calibration wizard.
