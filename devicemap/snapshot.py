@@ -124,6 +124,7 @@ def build() -> dict:
     for c in all_cams:
         if c.get("usb_parent"):
             cam_by_parent.setdefault(c["usb_parent"], []).append(c)
+    audio_by_parent = audio.usb_audio()  # sysname → {playback, capture, in_use}
 
     ports = []
 
@@ -143,6 +144,7 @@ def build() -> dict:
         _attach(port["device"], "storage", block_by_parent)
         _attach(port["device"], "hid_inputs", inputs_by_parent)
         _attach(port["device"], "camera", cam_by_parent)
+        _attach(port["device"], "audio", audio_by_parent)
         _prune_inputs(port["device"])
         ports.append(port)
 

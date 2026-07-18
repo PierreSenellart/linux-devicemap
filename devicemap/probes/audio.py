@@ -64,6 +64,33 @@ def _soundwire_codecs() -> dict[str, list[str]]:
     return roles
 
 
+def usb_audio() -> dict[str, dict]:
+    """USB sound cards keyed by their USB device sysname (e.g. '1-2.1'),
+    each with the directions it carries — playback = speaker, capture =
+    microphone — so a USB speakerphone/headset shows both. A device with
+    both is a duplex endpoint (speakerphone)."""
+    out: dict[str, dict] = {}
+    for card_path in sorted(glob.glob("/proc/asound/card[0-9]*")):
+        card = os.path.basename(card_path)
+        real = os.path.realpath(f"/sys/class/sound/{card}")
+        if "/usb" not in real:
+            continue
+        names = re.findall(r"/(\d+-[\d.]+)(?=/|$)", real)
+        if not names:
+            continue
+        entry = {"playback": False, "capture": False, "in_use": False}
+        for pcm in glob.glob(f"{card_path}/pcm*"):
+            stream = _pcm_info(pcm).get("stream", "")
+            if stream == "PLAYBACK":
+                entry["playback"] = True
+            elif stream == "CAPTURE":
+                entry["capture"] = True
+            if _pcm_running(pcm):
+                entry["in_use"] = True
+        out[names[-1]] = entry
+    return out
+
+
 def probe() -> list[dict]:
     endpoints = []
     codecs = _soundwire_codecs()

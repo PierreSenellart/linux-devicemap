@@ -175,7 +175,7 @@ function deviceIcon(dev) {
   if (cls.includes("wireless")) return "bluetooth";
   if (cls.includes("HID"))
     return /mouse|receiver|touchpad/.test(prod) ? "mouse" : "keyboard";
-  return "plug";
+  return "box"; // generic/unrecognized device (plug reads as power)
 }
 
 function storageHtml(dev) {
@@ -194,6 +194,28 @@ function storageHtml(dev) {
     .join("");
 }
 
+// A hub carrying a single device is just packaging — a peripheral's own
+// internal hub (a speakerphone, a monitor's hub with one thing on it) —
+// so represent the port by that device, not the hub. Chained single-child
+// hubs collapse through.
+function collapseHub(dev) {
+  let d = dev;
+  while (d && (d.classes || []).includes("hub") && (d.children || []).length === 1)
+    d = d.children[0];
+  return d;
+}
+
+// speaker/microphone roles of a USB audio device (a speakerphone is both)
+function audioHtml(dev) {
+  const a = dev.audio;
+  if (!a) return "";
+  const roles = [];
+  if (a.playback) roles.push(`${icon("speaker")} speaker`);
+  if (a.capture) roles.push(`${icon("mic")} microphone`);
+  if (!roles.length) return "";
+  return `<div class="sub net">${roles.join(" · ")}${a.in_use ? " · in use" : ""}</div>`;
+}
+
 function inputsHtml(dev) {
   if (!dev.hid_inputs || !dev.hid_inputs.length) return "";
   return dev.hid_inputs
@@ -202,7 +224,7 @@ function inputsHtml(dev) {
         ? "mouse"
         : /keyboard|keypad/i.test(n)
           ? "keyboard"
-          : "plug";
+          : "box";
       return `<div class="sub net">${icon(ic)} ${esc(n)}</div>`;
     })
     .join("");
@@ -369,7 +391,7 @@ function treeHtml(children) {
     const d = describeDevice(c);
     return (
       `<li>${icon(deviceIcon(c))}<span class="name">${esc(d.name)}</span>` +
-      ` <span class="sub">${esc(d.sub)}</span>${netHtml(c)}${storageHtml(c)}${inputsHtml(c)}${treeHtml(c.children)}</li>`
+      ` <span class="sub">${esc(d.sub)}</span>${netHtml(c)}${storageHtml(c)}${audioHtml(c)}${inputsHtml(c)}${treeHtml(c.children)}</li>`
     );
   });
   return `<ul class="devtree">${items.join("")}</ul>`;
@@ -435,9 +457,11 @@ function isCharger(port) {
 
 function shortDeviceLabel(port) {
   if (!port || !port.connected) return "";
-  const dev = port.device;
+  const dev = collapseHub(port.device);
   if (dev) {
-    const n = dev.product || dev.manufacturer || `${dev.vid}:${dev.pid}`;
+    const cam = (dev.camera || [])[0];
+    const n =
+      dev.product || dev.manufacturer || (cam && cam.name) || `${dev.vid}:${dev.pid}`;
     const extra = dev.children && dev.children.length ? ` +${dev.children.length}` : "";
     return (n.length > 14 ? n.slice(0, 13) + "…" : n) + extra;
   }
@@ -508,18 +532,20 @@ function renderPorts(ports, lay, form) {
       el.classList.add("pulse");
 
     let what;
-    const dev = describeDevice(port.device);
+    const primary = collapseHub(port.device);
+    const dev = describeDevice(primary);
     const loc = slotOfPort(lay, port.id);
     const locTxt = loc ? `${loc.side} · ` : "";
     const portId = `<span class="portid">${esc(locTxt)}${esc(port.id)}</span>`;
     if (dev) {
       what =
-        `<div class="name">${icon(deviceIcon(port.device))}${esc(dev.name)}${portId}</div>` +
+        `<div class="name">${icon(deviceIcon(primary))}${esc(dev.name)}${portId}</div>` +
         `<div class="sub">${esc(dev.sub)}</div>` +
-        netHtml(port.device) +
-        storageHtml(port.device) +
-        inputsHtml(port.device) +
-        treeHtml(port.device.children);
+        netHtml(primary) +
+        storageHtml(primary) +
+        audioHtml(primary) +
+        inputsHtml(primary) +
+        treeHtml(primary.children);
     } else if (port.kind === "audio-jack") {
       const j = port.jack || {};
       what = j.readable
@@ -573,7 +599,7 @@ function renderPorts(ports, lay, form) {
       editExtra = `<button class="placebtn unplace">unplace</button>`;
     }
     el.innerHTML =
-      `<div class="glyph">${icon(PORT_ICON[port.kind] || "plug")}` +
+      `<div class="glyph">${icon(PORT_ICON[port.kind] || "box")}` +
       `<div>${esc(KIND_LABEL[port.kind] || port.kind)}</div></div>` +
       `<div class="what">${what}</div>` +
       `<div class="power">${powerHtml(port.power)}${editExtra}</div>`;
@@ -685,7 +711,7 @@ function renderBuiltins(builtins) {
       value = `${esc(b.name)} · ${b.carrier ? "link up" : "no link"}`;
     }
     li.innerHTML =
-      `<span class="k">${icon(BUILTIN_ICON[b.kind] || "plug")}` +
+      `<span class="k">${icon(BUILTIN_ICON[b.kind] || "box")}` +
       `${esc(label)}</span><span>${value}</span>`;
     ul.appendChild(li);
   }
@@ -858,7 +884,7 @@ function slotSvg(snap, lay, form, faceName, s, showLabel = true) {
     `data-portid="${esc(s.port_id || "")}" data-basex="${x}" data-basey="${y}" ` +
     `data-label="${esc(s.label || "")}">` +
     `<rect class="marker" x="${x}" y="${y}" width="${SLOT_W}" height="${SLOT_H}" rx="4"/>` +
-    iconAt(SLOT_ICON[s.type] || "plug", x + 5, y + 3, 16) +
+    iconAt(SLOT_ICON[s.type] || "box", x + 5, y + 3, 16) +
     arrow +
     labelSvg +
     `<title>${esc(s.label)}${status ? " — " + status : ""}</title></g>`
@@ -914,8 +940,16 @@ function renderChassis(snap) {
         inner += slotSvg(snap, lay, form, faceName, s, keepLabel.has(s.id));
         const face = faceGeom(form, faceName);
         const port = (snap.ports || []).find((p) => p.id === s.port_id);
-        if (face && port && port.device && (port.device.children || []).length)
-          satellites.push({ port, face, ...slotXY(face, s.pos) });
+        // only a genuine multi-device hub/dock earns a satellite box; a
+        // hub carrying a single device is collapsed into that device
+        const prim = collapseHub(port && port.device);
+        if (
+          face &&
+          prim &&
+          (prim.classes || []).includes("hub") &&
+          (prim.children || []).length >= 2
+        )
+          satellites.push({ port, face, dev: prim, ...slotXY(face, s.pos) });
       }
     // name the identified PCIe card(s) in the free part of the bracket strip
     const pcie = FACES[form].pcie;
@@ -959,7 +993,7 @@ function renderChassis(snap) {
     const GAP = 14;
     let bx = 320 - (satellites.length * (W + GAP) - GAP) / 2;
     for (const s of satellites) {
-      const d = s.port.device;
+      const d = s.dev;
       const title = d.product || "hub";
       const edgeFace = s.face.kind === "edge";
       let icons = "";
