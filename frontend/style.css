@@ -156,6 +156,7 @@ svg .satlink { stroke: var(--chassis-line); fill: none; stroke-dasharray: 4 3; }
 svg .zone { fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke: var(--accent); stroke-width: 0.75; }
 svg .zonelink { stroke: var(--chassis-line); fill: none; stroke-dasharray: 2 2; opacity: 0.6; }
 svg .zonelabel { font-size: 8px; fill: var(--muted); }
+svg .cardname { font-size: 9px; fill: var(--muted); font-style: italic; }
 .hidebtn,
 .placebtn {
   font: inherit;

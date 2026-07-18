@@ -24,7 +24,10 @@ REGISTRY_RAW = (
 # slot types with no kernel-visible state (nothing to bind or calibrate)
 PASSIVE_TYPES = {"sim", "lock", "smartcard"}
 
-_SKELETON_KINDS = ("usb-c", "usb-a", "hdmi", "dp", "vga", "dvi", "sd", "audio-jack")
+_SKELETON_KINDS = (
+    "usb-c", "usb-a", "hdmi", "dp", "vga", "dvi", "sd", "audio-jack",
+    "optical", "ethernet",
+)
 
 # faces per form factor: laptops carry ports on the two side edges;
 # desktops on the rear I/O shield, the front panel, and the PCIe bracket
@@ -221,6 +224,9 @@ def _card_slots(snap: dict, bound_drm: set) -> list:
                     },
                     "binding": {"drm": conn["id"]},
                     "card": True,
+                    # the identified card (registry name, else the PCI id),
+                    # so the UI can label the bracket with what is in it
+                    "card_name": (card or {}).get("name") or (ids and f"PCI {ids}"),
                 }
             )
     return slots
@@ -385,6 +391,10 @@ def _matches(binding: dict | None, port: dict) -> bool:
         return port["id"] == binding["drm"]
     if "mmc" in binding:
         return port.get("kind") == "sd" and port["id"] == binding["mmc"]
+    if "optical" in binding:
+        return port.get("kind") == "optical" and port["id"] == binding["optical"]
+    if "net" in binding:
+        return port.get("kind") == "ethernet" and port["id"] == binding["net"]
     if "jack" in binding:
         return port.get("kind") == "audio-jack"
     return False
@@ -400,6 +410,10 @@ def binding_for_port(port: dict) -> dict | None:
         return {"drm": port["id"]}
     if port.get("kind") == "sd":
         return {"mmc": port["id"]}
+    if port.get("kind") == "optical":
+        return {"optical": port["id"]}
+    if port.get("kind") == "ethernet":
+        return {"net": port["id"]}
     if port.get("kind") == "audio-jack":
         return {"jack": True}
     return None

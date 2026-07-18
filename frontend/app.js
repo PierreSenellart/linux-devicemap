@@ -11,6 +11,8 @@ const KIND_LABEL = {
   dvi: "DVI",
   "audio-jack": "JACK",
   sd: "SD",
+  optical: "CD/DVD",
+  ethernet: "RJ45",
 };
 
 const SLOT_ICON = {
@@ -20,6 +22,8 @@ const SLOT_ICON = {
   dp: "monitor",
   "audio-jack": "headphones",
   sd: "memory-stick",
+  optical: "disc",
+  ethernet: "ethernet-port",
   sim: "smartphone",
   lock: "lock",
   smartcard: "credit-card",
@@ -119,6 +123,8 @@ const PORT_ICON = {
   dvi: "monitor",
   "audio-jack": "headphones",
   sd: "memory-stick",
+  optical: "disc",
+  ethernet: "ethernet-port",
 };
 
 const BUILTIN_ICON = {
@@ -428,9 +434,16 @@ function shortDeviceLabel(port) {
   if (port.power && port.power.partner_present)
     return isCharger(port) ? "charger" : "attached";
   if (port.card) return port.card.name || "card";
+  if (port.kind === "optical") return "disc";
+  if (port.kind === "ethernet") return port.connected ? "link up" : "";
   if (port.kind === "hdmi" || port.kind === "dp") return "display";
   if (port.kind === "audio-jack") return "plugged";
   return "";
+}
+
+// distinct identified-card names among a face's slots (PCIe bracket)
+function cardNames(slots) {
+  return [...new Set((slots || []).map((s) => s.card_name).filter(Boolean))];
 }
 
 function renderPorts(ports, lay, form) {
@@ -442,12 +455,18 @@ function renderPorts(ports, lay, form) {
   const used = new Set();
   for (const [side, slots] of Object.entries(lay.sides || {})) {
     const face = faceGeom(form, side);
+    const names = cardNames(slots);
+    const groupLabel = face
+      ? names.length
+        ? `${face.label} · ${names.join(", ")}`
+        : face.label
+      : side;
     for (const s of [...slots].sort(
       (a, b) => a.pos.y - b.pos.y || a.pos.x - b.pos.x
     )) {
       const p = s.port_id && ports.find((x) => x.id === s.port_id);
       if (p) {
-        ordered.push({ port: p, group: face ? face.label : side });
+        ordered.push({ port: p, group: groupLabel });
         used.add(p.id);
       }
     }
@@ -507,6 +526,23 @@ function renderPorts(ports, lay, form) {
       what = c
         ? `<div class="name">${esc(c.name || "card")}${c.size_gb ? ` · ${c.size_gb} GB` : ""}</div>`
         : `<div class="name">empty</div>`;
+    } else if (port.kind === "optical") {
+      const o = port.optical || {};
+      const mts = mountsLabel(o.mounts);
+      what =
+        `<div class="name">${esc(o.name || "optical drive")}</div>` +
+        `<div class="sub">${
+          port.connected
+            ? `disc loaded${o.size_gb ? ` · ${o.size_gb} GB` : ""}${mts ? ` · ${esc(mts)}` : ""}`
+            : "no disc"
+        }</div>`;
+    } else if (port.kind === "ethernet") {
+      const n = port.iface || {};
+      what =
+        `<div class="name">${port.connected ? "link up" : "no link"}</div>` +
+        `<div class="sub">${esc(n.ifname || "")}${
+          port.connected && n.speed_mbps ? ` · ${n.speed_mbps} Mb/s` : ""
+        }</div>`;
     } else if (port.kind === "hdmi" || port.kind === "dp") {
       what = `<div class="name">${
         port.connected ? esc(port.monitor || "display connected") : "empty"
@@ -867,6 +903,13 @@ function renderChassis(snap) {
         if (face && port && port.device && (port.device.children || []).length)
           satellites.push({ port, face, ...slotXY(face, s.pos) });
       }
+    // name the identified PCIe card(s) in the free part of the bracket strip
+    const pcie = FACES[form].pcie;
+    const names = cardNames((lay.sides || {}).pcie);
+    if (pcie && names.length)
+      inner +=
+        `<text class="cardname" x="${pcie.x + pcie.w - 8}" y="${pcie.y + pcie.h / 2 + 3}" ` +
+        `text-anchor="end">${esc(names.join(" · "))}</text>`;
   } else {
     inner += `<text x="320" y="374" text-anchor="middle">no layout for this machine</text>`;
   }

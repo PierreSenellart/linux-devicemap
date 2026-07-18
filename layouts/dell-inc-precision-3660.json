@@ -10,7 +10,7 @@
   "HDMI-A-2",
   "HDMI-A-3"
  ],
- "source": "Dell Precision 3660 Tower Setup & Specifications guide + front/back product photos. Rear I/O block: line-out, 2x DP 1.4, 2x USB-C (10Gbps), 2x USB-A (10Gbps), 2x USB 2.0, RJ45, and an optional video-port/2.5GbE knockout. Front column: universal jack, 2x USB-A, USB-C 10Gbps, USB-C 20Gbps, SD. Positions read off the photos; the board's DP connectors (i915 exposes six, only two are fitted) and most USB holes still need the wizard to bind \u2014 the kernel gives no connector<->port link on this board. PCIe-card outputs are added from the card registry, not this entry.",
+ "source": "Dell Precision 3660 Tower Setup & Specifications guide + front/back product photos. Rear I/O block: line-out, 2x DP 1.4, 2x USB-C (10Gbps), 2x USB-A (10Gbps), 2x USB 2.0, RJ45, and an optional video-port/2.5GbE knockout. Front: optical drive bay at the top, then universal jack, 2x USB-A, USB-C 10Gbps, USB-C 20Gbps, SD. Positions read off the photos; the board's DP connectors (i915 exposes six, only two are fitted) and most USB holes still need the wizard to bind \u2014 the kernel gives no connector<->port link on this board. PCIe-card outputs are added from the card registry, not this entry.",
  "sides": {
   "rear": [
    {
@@ -120,16 +120,40 @@
       "usb1-port10"
      ]
     }
+   },
+   {
+    "id": "rj45",
+    "type": "ethernet",
+    "label": "RJ45 (1GbE)",
+    "pos": {
+     "x": 0.63,
+     "y": 0.93
+    },
+    "binding": {
+     "net": "enp0s31f6"
+    }
    }
   ],
   "front": [
+   {
+    "id": "optical",
+    "type": "optical",
+    "label": "Optical drive bay",
+    "pos": {
+     "x": 0.5,
+     "y": 0.04
+    },
+    "binding": {
+     "optical": "sr0"
+    }
+   },
    {
     "id": "front-jack",
     "type": "audio-jack",
     "label": "Universal audio jack",
     "pos": {
      "x": 0.5,
-     "y": 0.08
+     "y": 0.2
     },
     "binding": {
      "jack": true
@@ -141,7 +165,7 @@
     "label": "USB-A 5Gbps (PowerShare)",
     "pos": {
      "x": 0.5,
-     "y": 0.26
+     "y": 0.34
     },
     "binding": null
    },
@@ -151,7 +175,7 @@
     "label": "USB-A 5Gbps",
     "pos": {
      "x": 0.5,
-     "y": 0.42
+     "y": 0.46
     },
     "binding": null
    },
@@ -161,7 +185,7 @@
     "label": "USB-C 10Gbps",
     "pos": {
      "x": 0.5,
-     "y": 0.58
+     "y": 0.6
     },
     "binding": {
      "typec": "port2"

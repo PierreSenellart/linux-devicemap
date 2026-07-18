@@ -203,7 +203,42 @@ def build() -> dict:
             }
         )
 
-    cams, bts = media.cameras(), media.bluetooth()
+    # optical drives are a front-panel bay, not an internal disk: surface
+    # them as ports (with disc presence) so a layout can place them
+    internal_disks = []
+    for d in block_info["internal"]:
+        if d.get("optical"):
+            ports.append(
+                {
+                    "id": d["dev"],
+                    "kind": "optical",
+                    "connected": bool(d.get("media")),
+                    "device": None,
+                    "power": None,
+                    "optical": d,
+                }
+            )
+        else:
+            internal_disks.append(d)
+
+    # a camera or bluetooth radio sitting on a user-facing USB port is a
+    # plugged-in peripheral, already shown in that port's device tree — not
+    # a built-in. Only ones on internal (hardwired) ports are built-ins.
+    user_facing: set[str] = set()
+
+    def _collect(dev: dict | None) -> None:
+        if not dev:
+            return
+        user_facing.add(dev["sysname"])
+        user_facing.update(dev.get("halves", []))
+        for child in dev.get("children", []):
+            _collect(child)
+
+    for conn in usb_info["connectors"]:
+        _collect(conn["device"])
+
+    cams = [c for c in media.cameras() if c.get("usb_parent") not in user_facing]
+    bts = [b for b in media.bluetooth() if b.get("usb_parent") not in user_facing]
     bt_info = bt.probe()
     if bt_info["available"]:
         aliases = {a["id"]: a for a in bt_info["adapters"]}
@@ -220,10 +255,25 @@ def build() -> dict:
         + cams
         + bts
         + audio.probe()
-        + block_info["internal"]
+        + internal_disks
     )
     for iface in net_info:
-        if not iface["usb_parent"]:
+        if iface["usb_parent"]:
+            continue  # already attached to its USB port's device tree
+        if iface["kind"] == "ethernet":
+            # the onboard RJ45 is a rear-panel port with live link state,
+            # so a layout can place it; wifi stays a built-in (no jack)
+            ports.append(
+                {
+                    "id": iface["ifname"],
+                    "kind": "ethernet",
+                    "connected": bool(iface["carrier"]),
+                    "device": None,
+                    "power": None,
+                    "iface": iface,
+                }
+            )
+        else:
             builtins.append({"kind": iface["kind"], "name": iface["ifname"], **iface})
     # internal USB devices already represented by a class device (camera,
     # bluetooth) are not listed a second time

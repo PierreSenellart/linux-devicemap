@@ -85,10 +85,16 @@ def probe() -> dict:
                 usb.setdefault(parents[-1], []).append(entry)
         else:
             model = read(f"{path}/device/model")
+            # SCSI peripheral type 5 is CD/DVD/BD; Linux always names those
+            # sr[0-9]. Present as a front optical bay, not an internal disk.
+            optical = read_int(f"{path}/device/type") == 5 or bool(
+                re.match(r"sr\d", name)
+            )
             internal.append(
                 {
-                    "kind": "disk",
+                    "kind": "optical" if optical else "disk",
                     "name": (model or name).strip(),
+                    "optical": optical,
                     **entry,
                 }
             )
