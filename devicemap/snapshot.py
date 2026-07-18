@@ -117,6 +117,13 @@ def build() -> dict:
     block_info = block.probe()
     block_by_parent = block_info["usb"]
     inputs_by_parent = inputs.usb_inputs()
+    # cameras index into the USB tree: a webcam's USB product string is
+    # often blank, so its V4L2 name is the only human-readable label
+    all_cams = media.cameras()
+    cam_by_parent: dict[str, list] = {}
+    for c in all_cams:
+        if c.get("usb_parent"):
+            cam_by_parent.setdefault(c["usb_parent"], []).append(c)
 
     ports = []
 
@@ -135,6 +142,7 @@ def build() -> dict:
         _attach(port["device"], "net", net_by_parent)
         _attach(port["device"], "storage", block_by_parent)
         _attach(port["device"], "hid_inputs", inputs_by_parent)
+        _attach(port["device"], "camera", cam_by_parent)
         _prune_inputs(port["device"])
         ports.append(port)
 
@@ -237,7 +245,7 @@ def build() -> dict:
     for conn in usb_info["connectors"]:
         _collect(conn["device"])
 
-    cams = [c for c in media.cameras() if c.get("usb_parent") not in user_facing]
+    cams = [c for c in all_cams if c.get("usb_parent") not in user_facing]
     bts = [b for b in media.bluetooth() if b.get("usb_parent") not in user_facing]
     bt_info = bt.probe()
     if bt_info["available"]:

@@ -147,6 +147,13 @@ function mountsLabel(mounts, max = 3) {
   return pts.length > max ? `${shown} +${pts.length - max}` : shown;
 }
 
+// capacity as GB below 1 TB, TB above (5001 GB → "5 TB", 1500 → "1.5 TB")
+function fmtSize(gb) {
+  if (gb == null) return "";
+  if (gb >= 1000) return `${+(gb / 1000).toFixed(1)} TB`;
+  return `${gb} GB`;
+}
+
 function icon(name) {
   return (typeof ICONS !== "undefined" && ICONS[name]) || "";
 }
@@ -176,7 +183,7 @@ function storageHtml(dev) {
   return dev.storage
     .map((s) => {
       let state = s.media
-        ? `${s.size_gb} GB`
+        ? fmtSize(s.size_gb)
         : s.removable
           ? "empty (no media)"
           : "no media";
@@ -344,12 +351,15 @@ function renderPower(power, form) {
 
 function describeDevice(dev) {
   if (!dev) return null;
+  const cam = (dev.camera || [])[0];
   const name =
     [dev.manufacturer, dev.product].filter(Boolean).join(" ") ||
+    (cam && cam.name) || // webcams often expose no USB product string
     `${dev.vid}:${dev.pid}`;
   const bits = [];
   if (dev.classes && dev.classes.length) bits.push(dev.classes.join(", "));
   if (dev.speed_mbps) bits.push(`${dev.speed_mbps} Mb/s`);
+  if (cam && cam.in_use) bits.push("in use");
   return { name, sub: bits.join(" · ") };
 }
 
@@ -524,7 +534,7 @@ function renderPorts(ports, lay, form) {
     } else if (port.kind === "sd") {
       const c = port.card;
       what = c
-        ? `<div class="name">${esc(c.name || "card")}${c.size_gb ? ` · ${c.size_gb} GB` : ""}</div>`
+        ? `<div class="name">${esc(c.name || "card")}${c.size_gb ? ` · ${fmtSize(c.size_gb)}` : ""}</div>`
         : `<div class="name">empty</div>`;
     } else if (port.kind === "optical") {
       const o = port.optical || {};
@@ -533,7 +543,7 @@ function renderPorts(ports, lay, form) {
         `<div class="name">${esc(o.name || "optical drive")}</div>` +
         `<div class="sub">${
           port.connected
-            ? `disc loaded${o.size_gb ? ` · ${o.size_gb} GB` : ""}${mts ? ` · ${esc(mts)}` : ""}`
+            ? `disc loaded${o.size_gb ? ` · ${fmtSize(o.size_gb)}` : ""}${mts ? ` · ${esc(mts)}` : ""}`
             : "no disc"
         }</div>`;
     } else if (port.kind === "ethernet") {
@@ -656,7 +666,7 @@ function renderBuiltins(builtins) {
     if (b.kind === "camera" && b.node) value += ` · ${esc(b.node)}`;
     if (b.kind === "disk") {
       value = esc(b.name);
-      if (b.size_gb) value += ` · ${b.size_gb} GB`;
+      if (b.size_gb) value += ` · ${fmtSize(b.size_gb)}`;
       const mts = mountsLabel(b.mounts);
       if (mts) value += ` · ${esc(mts)}`;
     }
@@ -697,7 +707,11 @@ function hlSlot(portId, on) {
 
 function hlCard(portId, on) {
   const card = document.querySelector(`.port[data-port="${CSS.escape(portId)}"]`);
-  if (card) card.classList.toggle("hl", on);
+  if (!card) return;
+  card.classList.toggle("hl", on);
+  // hovering the schema brings the matching port into view (the Machine
+  // panel is sticky, so the chassis stays put while the list scrolls)
+  if (on) card.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function iconAt(name, x, y, size) {

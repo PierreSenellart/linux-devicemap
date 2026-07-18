@@ -63,6 +63,16 @@ main {
   border-radius: 10px;
   padding: 0.9rem 1.1rem;
 }
+/* keep the schematic in view while the ports list scrolls under it, so
+   hovering a slot can bring its port into view without losing the chassis */
+#chassis-panel {
+  position: sticky;
+  top: 0.5rem;
+  align-self: start;
+  max-height: calc(100vh - 1rem);
+  overflow: auto;
+}
+@media (max-width: 900px) { #chassis-panel { position: static; max-height: none; } }
 h2 { font-size: 0.95rem; margin: 0.2rem 0 0.7rem; }
 h2 .note { font-weight: normal; color: var(--muted); font-size: 0.8rem; }
 #chassis { width: 100%; height: auto; }

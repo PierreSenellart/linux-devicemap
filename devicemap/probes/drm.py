@@ -79,6 +79,11 @@ def probe() -> dict:
         m = re.fullmatch(r"card\d+-(.+)-(\d+)", name)
         if not m or m.group(1) == "Writeback":
             continue
+        # the EFI boot framebuffer exposes a phantom connector (card0-
+        # Unknown-1) that isn't a real output; skip it once a GPU driver
+        # is up (it always is here)
+        if "simple-framebuffer" in os.path.realpath(f"{path}/device"):
+            continue
         conn_type = m.group(1)
         kind = _KINDS.get(conn_type, conn_type.lower())
         status = read(f"{path}/status")
