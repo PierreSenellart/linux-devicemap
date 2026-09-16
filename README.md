@@ -42,6 +42,14 @@ and BlueZ over D-Bus.
 - **RGB vs. IR camera labeling** needs read access to `/dev/video*`
   (typically the `video` group).
 
+## Authorship
+
+`linux-devicemap` is a personal tool by Pierre Senellart, written almost
+entirely by generative models from Anthropic (*Claude*) from his
+instructions, and reviewed only to the extent of working on his machines. It
+comes with no guarantee of any kind and no test suite. Chassis layouts for
+other machines are welcome in the `layouts/` registry.
+
 ## License
 
 MIT — see `LICENSE`.
